@@ -1,0 +1,41 @@
+name: RDP with Tailscale
+
+on:
+  workflow_dispatch:
+
+jobs:
+  rdp-session:
+    # Use your specific self-hosted runner label
+    runs-on: self-hosted-windows
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      # Tailscale GitHub Action is used to connect the runner to your tailnet
+      - name: Connect to Tailscale
+        uses: tailscale/github-action@v2
+        with:
+          authkey: ${{ secrets.TS_AUTHKEY }}
+          # Use an appropriate tag, e.g., tag:rdp-runner, after defining it in your ACLs
+          tags: tag:ci
+          version: latest
+      
+      - name: Configure Windows RDP
+        run: |
+          # Enable Remote Desktop (requires admin privileges, which self-hosted runners should have)
+          # Note: Command might vary based on Windows version/setup
+          Set-ItemProperty -Path 'HKLM:\System\CurrentControlSet\Control\Terminal Server' -Name 'fDenyTSConnections' -Value 0
+          # Ensure appropriate firewall rules are in place if needed
+
+      - name: Get Tailscale IP and wait for connection
+        run: |
+          # Get the Tailscale IP address and output it
+          $ts_ip = & "C:\Program Files\Tailscale\tailscale.exe" ip -4
+          echo "TAILSCALE_IP=$ts_ip" | Out-File -FilePath $env:GITHUB_ENV -Append
+          Write-Host "::notice title=RDP Information::RDP IP Address: $ts_ip"
+          Write-Host "The runner is now active on Tailscale. It will run for a maximum of 6 hours."
+          # A sleep command to keep the job running so you can connect via RDP
+          # The job will automatically terminate after GitHub's maximum job execution time (up to 6 hours)
+          Start-Sleep -Seconds 21600 
+        shell: powershell
