@@ -11,7 +11,7 @@ jobs:
     steps:
       - name: Configure Core RDP Settings
         run: |
-          # Enable Remote Desktop and disable Network Level Authentication (if needed)
+          # Enable Remote Desktop and disable Network Level Authentication
           Set-ItemProperty -Path 'HKLM:\System\CurrentControlSet\Control\Terminal Server' `
                              -Name "fDenyTSConnections" -Value 0 -Force
           Set-ItemProperty -Path 'HKLM:\System\CurrentControlSet\Control\Terminal Server\WinStations\RDP-Tcp' `
@@ -19,28 +19,34 @@ jobs:
           Set-ItemProperty -Path 'HKLM:\System\CurrentControlSet\Control\Terminal Server\WinStations\RDP-Tcp' `
                              -Name "SecurityLayer" -Value 0 -Force
 
-          # Remove existing firewall rule and add new one
+          # Firewall rule
           netsh advfirewall firewall delete rule name="RDP-Tailscale"
           netsh advfirewall firewall add rule name="RDP-Tailscale" dir=in action=allow protocol=TCP localport=3389
 
+          # Restart RDP service
           Restart-Service -Name TermService -Force
 
       - name: Create or Update RDP User with Fixed Password
         run: |
+          $username = "RDP"
           $password = "Rdp@1234!"  # Fixed, policy-compliant password
           $securePass = ConvertTo-SecureString $password -AsPlainText -Force
 
-          # Create new user or update existing user's password
-          if (Get-LocalUser -Name "RDP" -ErrorAction SilentlyContinue) {
-              Set-LocalUser -Name "RDP" -Password $securePass
+          # Check if user exists
+          if (Get-LocalUser -Name $username -ErrorAction SilentlyContinue) {
+              # Update password if user exists
+              Set-LocalUser -Name $username -Password $securePass
           } else {
-              New-LocalUser -Name "RDP" -Password $securePass -AccountNeverExpires -PasswordNeverExpires
+              # Create new user
+              New-LocalUser -Name $username -Password $securePass -AccountNeverExpires -PasswordNeverExpires
           }
 
-          Add-LocalGroupMember -Group "Administrators" -Member "RDP" -ErrorAction SilentlyContinue
-          Add-LocalGroupMember -Group "Remote Desktop Users" -Member "RDP" -ErrorAction SilentlyContinue
+          # Add to groups
+          Add-LocalGroupMember -Group "Administrators" -Member $username -ErrorAction SilentlyContinue
+          Add-LocalGroupMember -Group "Remote Desktop Users" -Member $username -ErrorAction SilentlyContinue
 
-          echo "RDP_CREDS=User: RDP | Password: $password" >> $env:GITHUB_ENV
+          # Expose creds
+          echo "RDP_CREDS=User: $username | Password: $password" >> $env:GITHUB_ENV
 
       - name: Install Tailscale
         run: |
