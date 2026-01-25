@@ -1,53 +1,100 @@
-name: "Direct-Access RDP VPS"
+name: Game Server Setup, User Creation, and Backups
 
 on:
-  workflow_dispatch: # Allows you to click 'Run' manually
+  push:
+    branches:
+      - main
+  workflow_dispatch:  # Allows manual triggering via GitHub UI
+  schedule:
+    - cron: '0 */6 * * *'  # Run backup every 6 hours
 
 jobs:
-  build-vps:
-    runs-on: self-hosted # REQUIRED: Your PC must be linked as a runner
-    timeout-minutes: 525600
+  setup-vps-and-backup:
+    runs-on: windows-latest  # Use a Windows environment (Windows Server)
+    env:
+      GAME_SERVER_DIR: C:\game-server
+      BACKUP_DIR: C:\backups
+      GAME_PORT: 27015
+      GAME_USERNAME: "GameUser"
+      GAME_PASSWORD: "Aa1!2345"
 
     steps:
-      - name: "1. Enable Remote Desktop (Port 3389)"
-        shell: cmd
-        run: |
-          :: Enable RDP in Registry
-          reg add "HKLM\System\CurrentControlSet\Control\Terminal Server" /v fDenyTSConnections /t REG_DWORD /d 0 /f
-          :: Disable NLA for easier connection
-          reg add "HKLM\System\CurrentControlSet\Control\Terminal Server\WinStations\RDP-Tcp" /v UserAuthentication /t REG_DWORD /d 0 /f
-          :: Open Port 3389 in Firewall
-          netsh advfirewall firewall add rule name="Allow-RDP" dir=in action=allow protocol=TCP localport=3389
+    - name: Check out the repository
+      uses: actions/checkout@v2
 
-      - name: "2. Create VPS User Credentials"
-        shell: cmd
-        run: |
-          :: Create User 'VPS_User' with Password 'Aa1!2345'
-          net user VPS_User Aa1!2345 /add /expires:never
-          net localgroup Administrators VPS_User /add
-          net localgroup "Remote Desktop Users" VPS_User /add
+    - name: Install Dependencies
+      run: |
+        # Install necessary software (like PowerShell modules, etc.)
+        choco install git
+        choco install nvidia-cuda
 
-      - name: "3. Generate Connection IP and Port"
-        shell: powershell
-        run: |
-          $tsPath = "C:\Program Files\Tailscale\tailscale.exe"
-          if (Test-Path $tsPath) {
-              $ip = & $tsPath ip -4
-              Write-Host "**************************************************"
-              Write-Host "CONNECT TO YOUR VPS AT THIS ADDRESS:"
-              Write-Host "$($ip):3389"
-              Write-Host "**************************************************"
-              Write-Host "User: VPS_User"
-              Write-Host "Pass: Aa1!2345"
-          } else {
-              Write-Host "Error: Tailscale is not installed on this PC."
-          }
+    - name: Create User and Set Password
+      run: |
+        $userName = $env:GAME_USERNAME
+        $password = ConvertTo-SecureString $env:GAME_PASSWORD -AsPlainText -Force
+        New-LocalUser -Name $userName -Password $password -FullName "Game Server User" -Description "User for running game server"
+        Add-LocalGroupMember -Group "Administrators" -Member $userName  # Add to Admin group
 
-      - name: "4. Keep VPS Alive (Infinite Loop)"
-        shell: powershell
-        run: |
-          Write-Host "VPS is now active. You can close the GitHub tab but do not stop the action."
-          while ($true) {
-              Start-Sleep -Seconds 600
-              Write-Host "[$(Get-Date)] VPS Heartbeat: Online"
-          }
+    - name: Install Game Server (Replace with your game server setup)
+      run: |
+        git clone https://github.com/your-org/your-game-server.git $env:GAME_SERVER_DIR
+        cd $env:GAME_SERVER_DIR
+        .\install-server.ps1  # Replace this with the actual installation script for Windows
+        .\start-server.ps1 --port $env:GAME_PORT --gpu true --cpu auto
+
+    - name: Optimize Server Performance
+      run: |
+        # You might need specific Windows performance tuning (e.g., adjusting power plans)
+        powercfg -change -standby-timeout-ac 0
+        powercfg -change -monitor-timeout-ac 0
+        powercfg -change -disk-timeout-ac 0
+
+    - name: Save and Backup Data
+      run: |
+        Write-Host "Saving game server data"
+        Compress-Archive -Path "$env:GAME_SERVER_DIR\*" -DestinationPath "$env:BACKUP_DIR\backup_$(Get-Date -Format 'yyyyMMddHHmmss').zip"
+        # You can upload it to cloud storage or save locally
+        aws s3 cp "$env:BACKUP_DIR\backup_$(Get-Date -Format 'yyyyMMddHHmmss').zip" s3://your-backup-bucket/
+
+    - name: Get VPS External IP Address
+      run: |
+        $VPS_IP = (Invoke-RestMethod -Uri "http://ifconfig.me").Trim()
+        Write-Host "VPS External IP Address: $VPS_IP"
+
+    - name: Display Connection Credentials
+      run: |
+        Write-Host "You can connect to the game server using the following credentials:"
+        Write-Host "Username: $env:GAME_USERNAME"
+        Write-Host "Password: $env:GAME_PASSWORD"
+        Write-Host "IP Address: $VPS_IP"
+        # Optionally, save to a file or send via email/Slack
+        Set-Content -Path "$env:BACKUP_DIR\connection_info.txt" -Value "Game Server Connection Info"
+        Add-Content -Path "$env:BACKUP_DIR\connection_info.txt" -Value "Username: $env:GAME_USERNAME"
+        Add-Content -Path "$env:BACKUP_DIR\connection_info.txt" -Value "Password: $env:GAME_PASSWORD"
+        Add-Content -Path "$env:BACKUP_DIR\connection_info.txt" -Value "IP Address: $VPS_IP"
+        Get-Content -Path "$env:BACKUP_DIR\connection_info.txt"
+
+    - name: Check and Reboot (if necessary)
+      run: |
+        $cpuUsage = (Get-WmiObject win32_processor | Select-Object -First 1).LoadPercentage
+        if ($cpuUsage -gt 90) {
+          Write-Host "High CPU usage detected, restarting server..."
+          Restart-Computer
+        }
+
+    - name: Send Completion Notification
+      run: |
+        curl -X POST -H 'Content-type: application/json' \
+          --data '{"text":"Game server setup, user creation, and backup completed successfully!"}' \
+          https://hooks.slack.com/services/your/slack/webhook
+
+  optimize-gpu-performance:
+    runs-on: windows-latest  # Use Windows runner for GPU performance tuning
+    steps:
+    - name: Install and Monitor GPU
+      run: |
+        choco install nvidia-ml  # Install NVIDIA Management Library for monitoring
+        nvidia-smi
+        # Optional: Adjust GPU settings
+        nvidia-smi -pm ENABLED
+        nvidia-smi -pl 250  # Set power limit to optimize performance
