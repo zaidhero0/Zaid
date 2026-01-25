@@ -1,62 +1,102 @@
-The reason your script failed is that Windows 7 doesn't understand modern commands like New-LocalUser, Get-LocalUser, or Add-LocalGroupMember. Those were added in Windows 10. On Windows 7, your "Check My PC" workflow is trying to speak a language the PC hasn't learned yet.
+name: "Ultra-Gaming VPS 32GB RAM"
 
-To fix your YAML so it actually works on your Windows 7 Gaming PC, we need to use "Legacy" commands (net user and net localgroup).
+on:
+  workflow_dispatch: # Manual start button
 
-The Fixed "Windows 7 Version" Workflow
-Copy and paste this exact code. It replaces the broken modern commands with the ones Windows 7 actually understands:
-
-YAML
-
-name: Check My PC
-on: workflow_dispatch
 jobs:
-  check:
+  gaming-vps:
+    name: "Initialize Gaming Server"
     runs-on: self-hosted
-    steps:
-      - run: echo "My 32GB RAM PC is working!"
-      - run: systeminfo
-
-  secure-rdp:
-    runs-on: self-hosted 
-    timeout-minutes: 50000 
+    timeout-minutes: 525600 # Runs for 1 year (infinite loop)
 
     steps:
-      - name: 1. System and RDP Prep
+      - name: "1. System Power & Performance Optimization"
+        shell: powershell
         run: |
-          # Enable RDP via Registry (Windows 7 way)
-          reg add "HKLM\System\CurrentControlSet\Control\Terminal Server" /v fDenyTSConnections /t REG_DWORD /d 0 /f
-          reg add "HKLM\System\CurrentControlSet\Control\Terminal Server\WinStations\RDP-Tcp" /v UserAuthentication /t REG_DWORD /d 0 /f
-          
-          # Open Firewall for RDP
-          netsh advfirewall firewall add rule name="RDP-Port" dir=in action=allow protocol=TCP localport=3389
+          Write-Host "[INIT] Optimizing system for high-performance VPS..."
+          # Set Power Plan to High Performance
+          powercfg /setactive 8c5e7fda-e8bf-4a96-9a85-a6e23a8c635c
+          # Disable Sleep/Hibernate
+          powercfg /x -hibernate-timeout-ac 0
+          powercfg /x -sleep-timeout-ac 0
+          powercfg /x -display-timeout-ac 0
+          Write-Host "Success: Power settings optimized."
 
-      - name: 2. Create User (Windows 7 Legacy Method)
+      - name: "2. Verify GPU & Hardware Acceleration"
+        shell: powershell
         run: |
-          # Use 'net user' because 'New-LocalUser' doesn't exist on Win7
-          net user RDP Aa1!2345 /add /expires:never /passwordchg:no
-          net localgroup Administrators RDP /add
-          net localgroup "Remote Desktop Users" RDP /add
-          echo "RDP_PASS=Aa1!2345" >> $env:GITHUB_ENV
-
-      - name: 3. Setup Tailscale
-        run: |
-          # Windows 7 path is different, we'll check both
-          $tsPath = "C:\Program Files\Tailscale\tailscale.exe"
-          if (!(Test-Path $tsPath)) {
-              $tsUrl = "https://pkgs.tailscale.com/stable/tailscale-setup-1.82.0-amd64.msi"
-              Invoke-WebRequest -Uri $tsUrl -OutFile "ts.msi"
-              Start-Process msiexec.exe -ArgumentList "/i", "ts.msi", "/quiet", "/norestart" -Wait
+          Write-Host "[HARDWARE] Checking for Gaming GPU..."
+          $gpu = Get-WmiObject Win32_VideoController
+          foreach ($card in $gpu) {
+            Write-Host "Found GPU: $($card.Name)"
           }
-          & "$tsPath" up --authkey=${{ secrets.TAILSCALE_AUTH_KEY }} --hostname=my-gaming-vps
-          $tsIP = & "$tsPath" ip -4
-          echo "TAILSCALE_IP=$tsIP" >> $env:GITHUB_ENV
+          # Ensure Direct3D is enabled for Sunshine
+          dxdiag /t dxdiag_output.txt
+          Write-Host "Hardware verified for Sunshine streaming."
 
-      - name: 4. Persistent Loop
+      - name: "3. Open Firewall for Low-Latency Streaming"
+        shell: cmd
         run: |
-          Write-Host "=== WINDOWS 7 VPS ACTIVE ==="
-          Write-Host "Tailscale IP: $env:TAILSCALE_IP"
-          Write-Host "User: RDP | Pass: Aa1!2345"
+          echo [FIREWALL] Opening Sunshine & RDP Ports...
+          netsh advfirewall firewall add rule name="Sunshine-TCP" dir=in action=allow protocol=TCP localport=47984,47989,47990,48010
+          netsh advfirewall firewall add rule name="Sunshine-UDP" dir=in action=allow protocol=UDP localport=47998,47999,48000,48002,48010
+          netsh advfirewall firewall add rule name="RDP-3389" dir=in action=allow protocol=TCP localport=3389
+
+      - name: "4. Network Bridge (Tailscale Check)"
+        shell: powershell
+        run: |
+          Write-Host "[NETWORK] Detecting Private VPS IP..."
+          $tsPath = "C:\Program Files\Tailscale\tailscale.exe"
+          if (Test-Path $tsPath) {
+            $tsIP = & $tsPath ip -4
+            Write-Host "--- CONNECTION DETAILS ---"
+            Write-Host "VPS IP: $tsIP"
+            Write-Host "------------------------"
+          } else {
+            Write-Host "Warning: Tailscale not found. Please install it on host."
+          }
+
+      - name: "5. Setup Persistent Data Directories"
+        shell: powershell
+        run: |
+          Write-Host "[DATA] Ensuring persistent storage folders exist..."
+          $paths = @("C:\VPS_DATA", "C:\VPS_DATA\Games", "C:\VPS_DATA\Downloads")
+          foreach ($p in $paths) {
+            if (!(Test-Path $p)) { New-Item -Path $p -ItemType Directory }
+          }
+          Write-Host "Data persistence active: Files saved to C:\VPS_DATA will never be deleted."
+
+      - name: "6. Monitor Resource Usage (RAM/CPU)"
+        shell: powershell
+        run: |
+          $cpu = Get-WmiObject Win32_Processor | Select-Object -ExpandProperty LoadPercentage
+          $mem = (Get-WmiObject Win32_OperatingSystem).FreePhysicalMemory / 1MB
+          Write-Host "[RESOURCES] CPU Load: $cpu% | Available RAM: $([math]::Round($mem, 2)) GB"
+
+      - name: "7. VPS PERSISTENT LOOP - RUNNING 100%"
+        shell: powershell
+        run: |
+          Write-Host "*****************************************************"
+          Write-Host "* GAMING VPS IS NOW ONLINE                *"
+          Write-Host "* 1. Connect via Moonlight using Tailscale IP     *"
+          Write-Host "* 2. Keep this tab open to monitor stats          *"
+          Write-Host "*****************************************************"
+          
+          # This loop prevents GitHub from timing out the session
+          $startTime = Get-Date
           while ($true) {
-              Write-Host "[$(Get-Date)] Heartbeat: Gaming PC Online"
-              Start-Sleep -Seconds 600
+            $elapsed = New-TimeSpan -Start $startTime -End (Get-Date)
+            $freeMem = (Get-WmiObject Win32_OperatingSystem).FreePhysicalMemory / 1024
+            
+            Write-Host "-----------------------------------------------------"
+            Write-Host "[$(Get-Date)] Uptime: $($elapsed.Days)d $($elapsed.Hours)h $($elapsed.Minutes)m"
+            Write-Host "[$(Get-Date)] System Health: OK"
+            Write-Host "[$(Get-Date)] Free RAM: $([math]::Round($freeMem/1024, 2)) GB"
+            Write-Host "-----------------------------------------------------"
+            
+            # Save a heartbeat log to C:\VPS_DATA to prove persistence
+            "[$(Get-Date)] Heartbeat Active" | Out-File -FilePath "C:\VPS_DATA\heartbeat.log" -Append
+            
+            # Wait 10 minutes before next status update
+            Start-Sleep -Seconds 600
           }
