@@ -12,10 +12,11 @@ jobs:
       - name: Update and install dependencies
         run: |
           sudo apt update
-          sudo apt install -y xrdp wget tailscale net-tools
+          sudo apt install -y xrdp wget net-tools snapd
 
-      - name: Install Tailscale
+      - name: Install Tailscale via Snap
         run: |
+          sudo snap install tailscale
           sudo tailscale up --authkey=${{ secrets.TAILSCALE_AUTH_KEY }} --hostname=gh-runner-$env:GITHUB_RUN_ID
 
       - name: Create RDP User with Guaranteed Password
