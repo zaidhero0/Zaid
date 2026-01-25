@@ -1,78 +1,61 @@
-name: RDP-Ultimate-Persistent
+name: RDP-Long-Term-Persistence
 
 on:
   workflow_dispatch:
 
 jobs:
   secure-rdp:
-    runs-on: windows-latest
-    timeout-minutes: 360 # GitHub's Hard Limit
+    # Change this to self-hosted to bypass the 6-hour limit
+    runs-on: self-hosted 
+    # Set to a very high number (e.g., 50,000 minutes = ~34 days)
+    timeout-minutes: 50000 
 
     steps:
-      - name: 1. Force Disable Password Complexity
+      - name: 1. System and RDP Prep
         run: |
-          # Export, Modify, and Re-import Security Policy
+          # Lower security for custom password
           secedit /export /cfg config.inf
           (Get-Content config.inf) -replace 'PasswordComplexity = 1', 'PasswordComplexity = 0' | Set-Content config.inf
           secedit /configure /db $env:windir\security\local.sdb /cfg config.inf /areas SECURITYPOLICY
           
-          # Configure RDP and Firewall
+          # Enable RDP
           Set-ItemProperty -Path 'HKLM:\System\CurrentControlSet\Control\Terminal Server' -Name "fDenyTSConnections" -Value 0 -Force
           Set-ItemProperty -Path 'HKLM:\System\CurrentControlSet\Control\Terminal Server\WinStations\RDP-Tcp' -Name "UserAuthentication" -Value 0 -Force
           netsh advfirewall firewall add rule name="RDP-Port" dir=in action=allow protocol=TCP localport=3389
           Restart-Service -Name TermService -Force
 
-      - name: 2. Create User (Password: Aa1!2345)
+      - name: 2. Create User
         run: |
           $password = "Aa1!2345"
           $securePass = ConvertTo-SecureString $password -AsPlainText -Force
-          New-LocalUser -Name "RDP" -Password $securePass -AccountNeverExpires
-          Add-LocalGroupMember -Group "Administrators" -Member "RDP"
-          Add-LocalGroupMember -Group "Remote Desktop Users" -Member "RDP"
+          if (!(Get-LocalUser -Name "RDP" -ErrorAction SilentlyContinue)) {
+              New-LocalUser -Name "RDP" -Password $securePass -AccountNeverExpires
+              Add-LocalGroupMember -Group "Administrators" -Member "RDP"
+              Add-LocalGroupMember -Group "Remote Desktop Users" -Member "RDP"
+          }
           echo "RDP_PASS=$password" >> $env:GITHUB_ENV
 
-      - name: 3. Install & Start Tailscale
+      - name: 3. Setup Tailscale
         run: |
-          $tsUrl = "https://pkgs.tailscale.com/stable/tailscale-setup-1.82.0-amd64.msi"
-          Invoke-WebRequest -Uri $tsUrl -OutFile "ts.msi"
-          Start-Process msiexec.exe -ArgumentList "/i", "ts.msi", "/quiet", "/norestart" -Wait
-          & "$env:ProgramFiles\Tailscale\tailscale.exe" up --authkey=${{ secrets.TAILSCALE_AUTH_KEY }} --hostname=vps-win11
+          # Check if Tailscale is already installed (common on self-hosted)
+          if (!(Test-Path "$env:ProgramFiles\Tailscale\tailscale.exe")) {
+              $tsUrl = "https://pkgs.tailscale.com/stable/tailscale-setup-1.82.0-amd64.msi"
+              Invoke-WebRequest -Uri $tsUrl -OutFile "ts.msi"
+              Start-Process msiexec.exe -ArgumentList "/i", "ts.msi", "/quiet", "/norestart" -Wait
+          }
+          & "$env:ProgramFiles\Tailscale\tailscale.exe" up --authkey=${{ secrets.TAILSCALE_AUTH_KEY }} --hostname=long-term-vps
           $tsIP = & "$env:ProgramFiles\Tailscale\tailscale.exe" ip -4
           echo "TAILSCALE_IP=$tsIP" >> $env:GITHUB_ENV
 
-      - name: 4. Restore Data from GitHub Storage
-        uses: actions/download-artifact@v4
-        with:
-          name: rdp-data
-          path: C:\Users\RDP\Desktop\SAVE_HERE
-        continue-on-error: true
-
-      - name: 5. Maintain Connection & Countdown
+      - name: 4. Persistent Loop
         run: |
-          $TotalMins = 360
-          $StartTime = Get-Date
-          Write-Host "=== RDP READY ==="
-          Write-Host "IP: $env:TAILSCALE_IP"
+          Write-Host "=== LONG TERM RDP ACTIVE ==="
+          Write-Host "Tailscale IP: $env:TAILSCALE_IP"
           Write-Host "User: RDP | Pass: Aa1!2345"
-          Write-Host "FOLDER: C:\Users\RDP\Desktop\SAVE_HERE"
+          Write-Host "This session will run until you manually stop it or the PC restarts."
           
-          # Create the save folder if it doesn't exist
-          if (!(Test-Path "C:\Users\RDP\Desktop\SAVE_HERE")) { New-Item -Path "C:\Users\RDP\Desktop\SAVE_HERE" -ItemType Directory }
-
-          # The Loop: Updates logs every 5 mins and stays alive
+          # Creates an infinite loop that keeps the GitHub Action 'In Progress'
           while ($true) {
-              $Elapsed = (Get-Date) - $StartTime
-              $Remaining = $TotalMins - $Elapsed.TotalMinutes
-              if ($Remaining -le 0) { break }
-              
-              Write-Host "[$(Get-Date)] STATUS: ACTIVE | TIME LEFT: $($Remaining.ToString('F0')) MINUTES"
-              Start-Sleep -Seconds 300
+              Write-Host "[$(Get-Date)] Heartbeat: System Active"
+              Start-Sleep -Seconds 600
           }
-
-      - name: 6. Auto-Save Data (Runs on Finish)
-        if: always()
-        uses: actions/upload-artifact@v4
-        with:
-          name: rdp-data
-          path: C:\Users\RDP\Desktop\SAVE_HERE
-          retention-days: 5
