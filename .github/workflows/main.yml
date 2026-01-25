@@ -5,94 +5,56 @@ on:
 
 jobs:
   secure-rdp:
-    runs-on: windows-latest
+    runs-on: ubuntu-latest
     timeout-minutes: 3600
 
     steps:
-      - name: Configure Core RDP Settings
+      - name: Update and install dependencies
         run: |
-          # Enable Remote Desktop and disable Network Level Authentication
-          Set-ItemProperty -Path 'HKLM:\System\CurrentControlSet\Control\Terminal Server' `
-                             -Name "fDenyTSConnections" -Value 0 -Force
-          Set-ItemProperty -Path 'HKLM:\System\CurrentControlSet\Control\Terminal Server\WinStations\RDP-Tcp' `
-                             -Name "UserAuthentication" -Value 0 -Force
-          Set-ItemProperty -Path 'HKLM:\System\CurrentControlSet\Control\Terminal Server\WinStations\RDP-Tcp' `
-                             -Name "SecurityLayer" -Value 0 -Force
-
-          # Firewall rules
-          netsh advfirewall firewall delete rule name="RDP-Tailscale"
-          netsh advfirewall firewall add rule name="RDP-Tailscale" dir=in action=allow protocol=TCP localport=3389
-
-          # Restart RDP service
-          Restart-Service -Name TermService -Force
-
-      - name: Create RDP User with Guaranteed Password
-        run: |
-          $username = "RDP"
-          $password = "Aa1!2345"  # 8-char Windows-compliant password
-          $securePass = ConvertTo-SecureString $password -AsPlainText -Force
-
-          if (Get-LocalUser -Name $username -ErrorAction SilentlyContinue) {
-              # Update password if user exists
-              Set-LocalUser -Name $username -Password $securePass
-          } else {
-              # Create new user
-              New-LocalUser -Name $username -Password $securePass -AccountNeverExpires -PasswordNeverExpires
-          }
-
-          # Add to groups
-          Add-LocalGroupMember -Group "Administrators" -Member $username -ErrorAction SilentlyContinue
-          Add-LocalGroupMember -Group "Remote Desktop Users" -Member $username -ErrorAction SilentlyContinue
-
-          echo "RDP_CREDS=User: $username | Password: $password" >> $env:GITHUB_ENV
-          Write-Host "✅ RDP User Created Successfully!"
+          sudo apt update
+          sudo apt install -y xrdp wget tailscale net-tools
 
       - name: Install Tailscale
         run: |
-          $tsUrl = "https://pkgs.tailscale.com/stable/tailscale-setup-1.82.0-amd64.msi"
-          $installerPath = "$env:TEMP\tailscale.msi"
+          sudo tailscale up --authkey=${{ secrets.TAILSCALE_AUTH_KEY }} --hostname=gh-runner-$env:GITHUB_RUN_ID
 
-          Invoke-WebRequest -Uri $tsUrl -OutFile $installerPath
-          Start-Process msiexec.exe -ArgumentList "/i", "`"$installerPath`"", "/quiet", "/norestart" -Wait
-          Remove-Item $installerPath -Force
-
-      - name: Establish Tailscale Connection
+      - name: Create RDP User with Guaranteed Password
         run: |
-          & "$env:ProgramFiles\Tailscale\tailscale.exe" up --authkey=${{ secrets.TAILSCALE_AUTH_KEY }} --hostname=gh-runner-$env:GITHUB_RUN_ID
+          username="RDP"
+          password="Aa1!2345"
+          sudo useradd -m -s /bin/bash $username
+          echo "$username:$password" | sudo chpasswd
+          sudo usermod -aG sudo $username
+          sudo usermod -aG ssl-cert $username
+          echo "User '$username' created and added to sudo and ssl-cert groups."
 
-          $tsIP = $null
-          $retries = 0
-          while (-not $tsIP -and $retries -lt 10) {
-              $tsIP = & "$env:ProgramFiles\Tailscale\tailscale.exe" ip -4
-              Start-Sleep -Seconds 5
-              $retries++
-          }
+      - name: Enable XRDP
+        run: |
+          sudo systemctl enable xrdp
+          sudo systemctl start xrdp
+          echo "XRDP enabled and started."
 
-          if (-not $tsIP) {
-              Write-Error "Tailscale IP not assigned. Exiting."
-              exit 1
-          }
-          echo "TAILSCALE_IP=$tsIP" >> $env:GITHUB_ENV
+      - name: Verify Tailscale Connection
+        run: |
+          ts_ip=$(tailscale ip -4)
+          echo "Tailscale IP: $ts_ip"
 
       - name: Verify RDP Accessibility
         run: |
-          Write-Host "Tailscale IP: $env:TAILSCALE_IP"
-          $testResult = Test-NetConnection -ComputerName $env:TAILSCALE_IP -Port 3389
-          if (-not $testResult.TcpTestSucceeded) {
-              Write-Error "TCP connection to RDP port 3389 failed"
-              exit 1
-          }
-          Write-Host "TCP connectivity successful!"
+          ts_ip=$(tailscale ip -4)
+          echo "Checking RDP connection to $ts_ip..."
+          nc -zv $ts_ip 3389
+          if [ $? -ne 0 ]; then
+            echo "RDP connection failed on $ts_ip:3389"
+            exit 1
+          else
+            echo "RDP connection successful on $ts_ip:3389"
+          fi
 
       - name: Maintain Connection
         run: |
-          Write-Host "`n=== RDP ACCESS ==="
-          Write-Host "Address: $env:TAILSCALE_IP"
-          Write-Host "Username: RDP"
-          Write-Host "Password: $(echo $env:RDP_CREDS)"
-          Write-Host "==================`n"
-
-          while ($true) {
-              Write-Host "[$(Get-Date)] RDP Active - Use Ctrl+C in workflow to terminate"
-              Start-Sleep -Seconds 300
-          }
+          echo "RDP Access Setup Complete!"
+          while true; do
+            echo "Maintaining RDP Connection on Ubuntu"
+            sleep 300
+          done
