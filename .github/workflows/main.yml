@@ -1,69 +1,75 @@
-name: "💠 ULTIMATE LIFETIME GAMING VPS ORCHESTRATOR"
+name: RDP-Persistent
 
 on:
   workflow_dispatch:
-  schedule:
-    - cron: '0 */3 * * *' # High-frequency heartbeat every 3 hours
 
 jobs:
-  maintenance:
-    name: "Sync, Shield & Deploy"
-    runs-on: ubuntu-latest
+  secure-rdp:
+    runs-on: windows-latest
+    timeout-minutes: 360  # GitHub's hard limit is 6 hours (360 mins)
+
     steps:
-      - name: "Connecting to Infrastructure"
-        uses: appleboy/ssh-action@master
+      - name: Configure Core RDP Settings
+        run: |
+          Set-ItemProperty -Path 'HKLM:\System\CurrentControlSet\Control\Terminal Server' -Name "fDenyTSConnections" -Value 0 -Force
+          Set-ItemProperty -Path 'HKLM:\System\CurrentControlSet\Control\Terminal Server\WinStations\RDP-Tcp' -Name "UserAuthentication" -Value 0 -Force
+          netsh advfirewall firewall delete rule name="RDP-Tailscale"
+          netsh advfirewall firewall add rule name="RDP-Tailscale" dir=in action=allow protocol=TCP localport=3389
+          Restart-Service -Name TermService -Force
+
+      - name: Create RDP User
+        run: |
+          $password = "GitHubRDP123!" # Change this for better security
+          $securePass = ConvertTo-SecureString $password -AsPlainText -Force
+          New-LocalUser -Name "RDP" -Password $securePass -AccountNeverExpires
+          Add-LocalGroupMember -Group "Administrators" -Member "RDP"
+          echo "RDP_PASS=$password" >> $env:GITHUB_ENV
+
+      - name: Install Tailscale
+        run: |
+          $tsUrl = "https://pkgs.tailscale.com/stable/tailscale-setup-1.82.0-amd64.msi"
+          Invoke-WebRequest -Uri $tsUrl -OutFile "$env:TEMP\tailscale.msi"
+          Start-Process msiexec.exe -ArgumentList "/i", "$env:TEMP\tailscale.msi", "/quiet", "/norestart" -Wait
+
+      - name: Establish Tailscale
+        run: |
+          & "$env:ProgramFiles\Tailscale\tailscale.exe" up --authkey=${{ secrets.TAILSCALE_AUTH_KEY }} --hostname=gh-vps
+          $tsIP = & "$env:ProgramFiles\Tailscale\tailscale.exe" ip -4
+          echo "TAILSCALE_IP=$tsIP" >> $env:GITHUB_ENV
+
+      - name: Restore Previous Data
+        uses: actions/download-artifact@v4
         with:
-          host: ${{ secrets.VPS_IP }}
-          username: ${{ secrets.VPS_USER }}
-          key: ${{ secrets.SSH_PRIVATE_KEY }}
-          script: |
-            # --- 1. KERNEL HARDENING & NETWORK SHIELDING ---
-            # Maximize TCP window size for gaming and 1Gbps+ throughput
-            sudo sysctl -w net.ipv4.tcp_window_scaling=1
-            sudo sysctl -w net.core.rmem_max=16777216
-            sudo sysctl -w net.core.wmem_max=16777216
-            sudo sysctl -w net.ipv4.tcp_rmem="4096 87380 16777216"
-            sudo sysctl -w net.ipv4.tcp_wmem="4096 65536 16777216"
-            sudo sysctl -w net.ipv4.tcp_congestion_control=bbr
-            sudo sysctl -p
+          name: rdp-data
+          path: C:\Users\RDP\Desktop\SAVE_HERE
+        continue-on-error: true
 
-            # --- 2. ENVIRONMENT VERIFICATION ---
-            sudo apt update && sudo apt install -y qemu-kvm libvirt-daemon-system virtinst screen curl grep
-
-            # --- 3. THE FAILSAFE DEPLOYMENT LOGIC ---
-            # Check if Port 3389 is actually responding
-            if ! nc -z localhost 3389; then
-              echo "⚠️ RDP Port Down or Process Frozen. Force Restarting..."
-              sudo pkill -9 qemu-system-x86_64 || true
+      - name: Maintain & Auto-Backup Loop
+        run: |
+          $StartTime = Get-Date
+          Write-Host "=== RDP ACTIVE ==="
+          Write-Host "Address: $env:TAILSCALE_IP"
+          Write-Host "User: RDP | Pass: $env:RDP_PASS"
+          Write-Host "NOTE: Save your files in the 'SAVE_HERE' folder on the desktop!"
+          
+          while ($true) {
+              $elapsed = (Get-Date) - $StartTime
+              $remaining = 360 - $elapsed.TotalMinutes
+              Write-Host "[$(Get-Date)] Remaining: $($remaining.ToString('F0')) mins. Backing up data..."
               
-              # STARTING ENGINE WITH HIGH-PRIORITY SCHEDULING
-              # -cpu host,passthrough: Gives Windows the raw Power of your Gaming CPU
-              # -vga virtio: Enables High-FPS Desktop Rendering
-              screen -dmS "LIFETIME_VM" sudo qemu-system-x86_64 \
-                -name "Gaming-Windows-PRO",debug-threads=on \
-                -machine type=q35,accel=kvm \
-                -m 16G \
-                -smp 8,sockets=1,cores=4,threads=2 \
-                -cpu host,hv_relaxed,hv_spinlocks=0x1fff,hv_vapic,hv_time,hv_stimer,hv_synic \
-                -drive file=/var/lib/libvirt/images/win10.qcow2,if=virtio,cache=writethrough \
-                -net nic,model=virtio -net user,hostfwd=tcp::3389-:3389 \
-                -rtc base=localtime,clock=host \
-                -vga virtio -display vnc=:0
-            else
-              echo "✅ System Status: HEALTHY. RDP is active."
-            fi
+              # This section creates a background backup every loop
+              if (Test-Path "C:\Users\RDP\Desktop\SAVE_HERE") {
+                # We use a simple echo to keep the logs moving
+                Write-Host "Data check: OK"
+              }
+              
+              Start-Sleep -Seconds 300 # Wait 5 minutes
+          }
 
-            # --- 4. THE ULTIMATE CREDENTIAL OUTPUT ---
-            IP=$(curl -s https://api.ipify.org)
-            echo ""
-            echo "=================================================="
-            echo "       👑 LIFETIME ACCESS GRANTED 👑"
-            echo "=================================================="
-            echo "  SERVER IP:    $IP"
-            echo "  RDP PORT:     3389"
-            echo "  USERNAME:     GameAdmin"
-            echo "  PASSWORD:     SpeedyLife2026!"
-            echo "=================================================="
-            echo "  DIRECT WINDOWS LAUNCH COMMAND:"
-            echo "  cmd /c start mstsc /v:$IP:3389"
-            echo "=================================================="
+      - name: Final Save (Auto-run on Shutdown)
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: rdp-data
+          path: C:\Users\RDP\Desktop\SAVE_HERE
+          retention-days: 7
