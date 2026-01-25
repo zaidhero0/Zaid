@@ -22,48 +22,89 @@ jobs:
     - name: Check out the repository
       uses: actions/checkout@v2
 
-    - name: Install Dependencies
+    # Step 1: Install Git (with fallback to manual installation if Chocolatey fails)
+    - name: Install Git (Chocolatey or Manual)
       run: |
-        # Install necessary software (like PowerShell modules, etc.)
-        choco install git
-        choco install nvidia-cuda
+        # Try to install Git via Chocolatey
+        try {
+          Write-Host "Installing Git via Chocolatey"
+          choco install git -y
+        } catch {
+          Write-Host "Chocolatey Git installation failed, attempting manual installation."
+          # Manually download and install Git
+          Invoke-WebRequest -Uri "https://github.com/git-for-windows/git/releases/download/v2.52.0.windows.1/MinGit-2.52.0-64-bit.zip" -OutFile "git.zip"
+          Expand-Archive -Path "git.zip" -DestinationPath "C:\Program Files\Git"
+          # Add Git to the PATH environment variable
+          $env:PATH += ";C:\Program Files\Git\cmd"
+        }
 
+    # Step 2: Install NVIDIA Drivers (for GPU acceleration)
+    - name: Install NVIDIA Drivers
+      run: |
+        Write-Host "Installing NVIDIA Drivers"
+        # Download NVIDIA driver package and install silently
+        Invoke-WebRequest -Uri "https://www.nvidia.com/Download/index.aspx" -OutFile "nvidia-driver.exe"
+        Start-Process -FilePath "nvidia-driver.exe" -ArgumentList "/quiet" -Wait
+        Write-Host "NVIDIA Drivers installed successfully."
+
+    # Step 3: Install CUDA (Optional)
+    - name: Install CUDA (Optional)
+      run: |
+        Write-Host "Installing CUDA Toolkit"
+        Invoke-WebRequest -Uri "https://developer.download.nvidia.com/compute/cuda/11.2.0/local_installers/cuda_11.2.0_460.27.04_windows.exe" -OutFile "cuda-installer.exe"
+        Start-Process -FilePath "cuda-installer.exe" -ArgumentList "/quiet" -Wait
+        Write-Host "CUDA Toolkit installed successfully."
+
+    # Step 4: Create User and Set Password
     - name: Create User and Set Password
       run: |
+        Write-Host "Creating user $env:GAME_USERNAME"
         $userName = $env:GAME_USERNAME
         $password = ConvertTo-SecureString $env:GAME_PASSWORD -AsPlainText -Force
         New-LocalUser -Name $userName -Password $password -FullName "Game Server User" -Description "User for running game server"
-        Add-LocalGroupMember -Group "Administrators" -Member $userName  # Add to Admin group
+        Add-LocalGroupMember -Group "Administrators" -Member $userName  # Add user to Admin group
+        Write-Host "User $env:GAME_USERNAME created successfully."
 
-    - name: Install Game Server (Replace with your game server setup)
+    # Step 5: Install and Start Game Server (Replace with your actual server setup)
+    - name: Install Game Server
       run: |
+        Write-Host "Cloning and installing the game server..."
         git clone https://github.com/your-org/your-game-server.git $env:GAME_SERVER_DIR
         cd $env:GAME_SERVER_DIR
-        .\install-server.ps1  # Replace this with the actual installation script for Windows
+        .\install-server.ps1  # Replace with the actual script to install your game server
         .\start-server.ps1 --port $env:GAME_PORT --gpu true --cpu auto
+        Write-Host "Game server installed and started successfully."
 
+    # Step 6: Optimize Server Performance
     - name: Optimize Server Performance
       run: |
-        # You might need specific Windows performance tuning (e.g., adjusting power plans)
+        Write-Host "Optimizing server performance"
+        # Adjust power settings for better performance
         powercfg -change -standby-timeout-ac 0
         powercfg -change -monitor-timeout-ac 0
         powercfg -change -disk-timeout-ac 0
+        Write-Host "Server performance optimized."
 
+    # Step 7: Backup Game Server Data
     - name: Save and Backup Data
       run: |
-        Write-Host "Saving game server data"
+        Write-Host "Saving and backing up game server data"
         Compress-Archive -Path "$env:GAME_SERVER_DIR\*" -DestinationPath "$env:BACKUP_DIR\backup_$(Get-Date -Format 'yyyyMMddHHmmss').zip"
-        # You can upload it to cloud storage or save locally
+        # Optionally, upload the backup to cloud storage (AWS, etc.)
         aws s3 cp "$env:BACKUP_DIR\backup_$(Get-Date -Format 'yyyyMMddHHmmss').zip" s3://your-backup-bucket/
+        Write-Host "Backup completed."
 
+    # Step 8: Get VPS External IP Address
     - name: Get VPS External IP Address
       run: |
+        Write-Host "Fetching external IP address..."
         $VPS_IP = (Invoke-RestMethod -Uri "http://ifconfig.me").Trim()
         Write-Host "VPS External IP Address: $VPS_IP"
 
+    # Step 9: Display Connection Credentials
     - name: Display Connection Credentials
       run: |
-        Write-Host "You can connect to the game server using the following credentials:"
+        Write-Host "Displaying connection credentials"
         Write-Host "Username: $env:GAME_USERNAME"
         Write-Host "Password: $env:GAME_PASSWORD"
         Write-Host "IP Address: $VPS_IP"
@@ -74,27 +115,20 @@ jobs:
         Add-Content -Path "$env:BACKUP_DIR\connection_info.txt" -Value "IP Address: $VPS_IP"
         Get-Content -Path "$env:BACKUP_DIR\connection_info.txt"
 
+    # Step 10: Check CPU Usage and Reboot if Necessary
     - name: Check and Reboot (if necessary)
       run: |
+        Write-Host "Checking CPU usage..."
         $cpuUsage = (Get-WmiObject win32_processor | Select-Object -First 1).LoadPercentage
         if ($cpuUsage -gt 90) {
           Write-Host "High CPU usage detected, restarting server..."
           Restart-Computer
         }
 
+    # Step 11: Send Completion Notification (Optional)
     - name: Send Completion Notification
       run: |
+        Write-Host "Sending completion notification"
         curl -X POST -H 'Content-type: application/json' \
           --data '{"text":"Game server setup, user creation, and backup completed successfully!"}' \
           https://hooks.slack.com/services/your/slack/webhook
-
-  optimize-gpu-performance:
-    runs-on: windows-latest  # Use Windows runner for GPU performance tuning
-    steps:
-    - name: Install and Monitor GPU
-      run: |
-        choco install nvidia-ml  # Install NVIDIA Management Library for monitoring
-        nvidia-smi
-        # Optional: Adjust GPU settings
-        nvidia-smi -pm ENABLED
-        nvidia-smi -pl 250  # Set power limit to optimize performance
