@@ -19,10 +19,11 @@ jobs:
       GAME_PASSWORD: "Aa1!2345"
 
     steps:
+    # Step 1: Check out the repository
     - name: Check out the repository
       uses: actions/checkout@v2
 
-    # Step 1: Install Git (Chocolatey or Manual)
+    # Step 2: Install Git using Chocolatey (or manual install if needed)
     - name: Install Git (Chocolatey or Manual)
       run: |
         try {
@@ -37,20 +38,19 @@ jobs:
           $env:PATH += ";C:\Program Files\Git\cmd"
         }
 
-    # Step 2: Check if NVIDIA Drivers are installed, if not, install them (only on supported machines)
-    - name: Check and Install NVIDIA Drivers (skip for GitHub Actions)
+    # Step 3: Clone the Game Server Repository
+    - name: Clone and Install Game Server
       run: |
-        if (Test-Path "C:\Program Files\NVIDIA Corporation") {
-          Write-Host "NVIDIA Drivers are already installed."
-        } else {
-          Write-Host "NVIDIA Driver not found. Skipping installation as this is likely a non-GPU environment."
+        Write-Host "Cloning and installing the game server..."
+        git clone https://$GITHUB_ACTOR:${{ secrets.GH_TOKEN }}@github.com/your-org/your-game-server.git $env:GAME_SERVER_DIR
+        if (-not (Test-Path $env:GAME_SERVER_DIR)) {
+          Write-Host "Game server directory does not exist. Exiting."
+          exit 1
         }
-
-    # Step 3: Install CUDA (Optional, if needed for GPU acceleration)
-    - name: Install CUDA (Optional)
-      run: |
-        Write-Host "Skipping CUDA installation in this environment, as it is likely non-GPU."
-        # If your environment supports CUDA, add CUDA installation here.
+        cd $env:GAME_SERVER_DIR
+        .\install-server.ps1  # Replace with the actual script to install your game server
+        .\start-server.ps1 --port $env:GAME_PORT --gpu true --cpu auto
+        Write-Host "Game server installed and started successfully."
 
     # Step 4: Create User and Set Password
     - name: Create User and Set Password
@@ -62,17 +62,7 @@ jobs:
         Add-LocalGroupMember -Group "Administrators" -Member $userName  # Add user to Admin group
         Write-Host "User $env:GAME_USERNAME created successfully."
 
-    # Step 5: Install and Start Game Server (Replace with your actual server setup)
-    - name: Install Game Server
-      run: |
-        Write-Host "Cloning and installing the game server..."
-        git clone https://github.com/your-org/your-game-server.git $env:GAME_SERVER_DIR
-        cd $env:GAME_SERVER_DIR
-        .\install-server.ps1  # Replace with the actual script to install your game server
-        .\start-server.ps1 --port $env:GAME_PORT --gpu true --cpu auto
-        Write-Host "Game server installed and started successfully."
-
-    # Step 6: Optimize Server Performance
+    # Step 5: Optimize Server Performance
     - name: Optimize Server Performance
       run: |
         Write-Host "Optimizing server performance"
@@ -82,7 +72,7 @@ jobs:
         powercfg -change -disk-timeout-ac 0
         Write-Host "Server performance optimized."
 
-    # Step 7: Backup Game Server Data
+    # Step 6: Save and Backup Data
     - name: Save and Backup Data
       run: |
         Write-Host "Saving and backing up game server data"
@@ -91,14 +81,14 @@ jobs:
         aws s3 cp "$env:BACKUP_DIR\backup_$(Get-Date -Format 'yyyyMMddHHmmss').zip" s3://your-backup-bucket/
         Write-Host "Backup completed."
 
-    # Step 8: Get VPS External IP Address
+    # Step 7: Get VPS External IP Address
     - name: Get VPS External IP Address
       run: |
         Write-Host "Fetching external IP address..."
         $VPS_IP = (Invoke-RestMethod -Uri "http://ifconfig.me").Trim()
         Write-Host "VPS External IP Address: $VPS_IP"
 
-    # Step 9: Display Connection Credentials
+    # Step 8: Display Connection Credentials
     - name: Display Connection Credentials
       run: |
         Write-Host "Displaying connection credentials"
@@ -112,7 +102,7 @@ jobs:
         Add-Content -Path "$env:BACKUP_DIR\connection_info.txt" -Value "IP Address: $VPS_IP"
         Get-Content -Path "$env:BACKUP_DIR\connection_info.txt"
 
-    # Step 10: Check CPU Usage and Reboot if Necessary
+    # Step 9: Check CPU Usage and Reboot if Necessary
     - name: Check and Reboot (if necessary)
       run: |
         Write-Host "Checking CPU usage..."
@@ -122,7 +112,7 @@ jobs:
           Restart-Computer
         }
 
-    # Step 11: Send Completion Notification (Optional)
+    # Step 10: Send Completion Notification (Optional)
     - name: Send Completion Notification
       run: |
         Write-Host "Sending completion notification"
