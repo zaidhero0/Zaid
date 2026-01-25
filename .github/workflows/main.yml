@@ -37,39 +37,20 @@ jobs:
           $env:PATH += ";C:\Program Files\Git\cmd"
         }
 
-    # Step 2: Check if NVIDIA Drivers are installed, if not, install them
-    - name: Check and Install NVIDIA Drivers
+    # Step 2: Check if NVIDIA Drivers are installed, if not, install them (only on supported machines)
+    - name: Check and Install NVIDIA Drivers (skip for GitHub Actions)
       run: |
-        try {
-          # Check if nvidia-smi is available
-          $nvidiaStatus = nvidia-smi
-          Write-Host "NVIDIA Driver is already installed."
-        } catch {
-          Write-Host "NVIDIA Driver not found. Installing NVIDIA Drivers..."
-          # Download NVIDIA driver installer
-          Invoke-WebRequest -Uri "https://www.nvidia.com/Download/index.aspx" -OutFile "nvidia-driver.exe"
-          Start-Process -FilePath "nvidia-driver.exe" -ArgumentList "/quiet /install" -Wait
-          Write-Host "NVIDIA Drivers installed successfully."
+        if (Test-Path "C:\Program Files\NVIDIA Corporation") {
+          Write-Host "NVIDIA Drivers are already installed."
+        } else {
+          Write-Host "NVIDIA Driver not found. Skipping installation as this is likely a non-GPU environment."
         }
 
     # Step 3: Install CUDA (Optional, if needed for GPU acceleration)
     - name: Install CUDA (Optional)
       run: |
-        try {
-          Write-Host "Checking if CUDA is already installed"
-          # Check if CUDA is already installed (optional)
-          $cudaVersion = Get-Command "nvcc" -ErrorAction SilentlyContinue
-          if ($cudaVersion) {
-            Write-Host "CUDA is already installed."
-          } else {
-            Write-Host "Installing CUDA Toolkit..."
-            Invoke-WebRequest -Uri "https://developer.download.nvidia.com/compute/cuda/11.2.0/local_installers/cuda_11.2.0_460.27.04_windows.exe" -OutFile "cuda-installer.exe"
-            Start-Process -FilePath "cuda-installer.exe" -ArgumentList "/quiet /install" -Wait
-            Write-Host "CUDA Toolkit installed successfully."
-          }
-        } catch {
-          Write-Host "Error occurred during CUDA installation. Skipping CUDA installation."
-        }
+        Write-Host "Skipping CUDA installation in this environment, as it is likely non-GPU."
+        # If your environment supports CUDA, add CUDA installation here.
 
     # Step 4: Create User and Set Password
     - name: Create User and Set Password
@@ -147,4 +128,4 @@ jobs:
         Write-Host "Sending completion notification"
         curl -X POST -H 'Content-type: application/json' \
           --data '{"text":"Game server setup, user creation, and backup completed successfully!"}' \
-          https://hooks.slack.com/services/your/slack/webhoo
+          https://hooks.slack.com/services/your/slack/webhook
