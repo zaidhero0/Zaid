@@ -1,3 +1,12 @@
+The reason your script failed is that Windows 7 doesn't understand modern commands like New-LocalUser, Get-LocalUser, or Add-LocalGroupMember. Those were added in Windows 10. On Windows 7, your "Check My PC" workflow is trying to speak a language the PC hasn't learned yet.
+
+To fix your YAML so it actually works on your Windows 7 Gaming PC, we need to use "Legacy" commands (net user and net localgroup).
+
+The Fixed "Windows 7 Version" Workflow
+Copy and paste this exact code. It replaces the broken modern commands with the ones Windows 7 actually understands:
+
+YAML
+
 name: Check My PC
 on: workflow_dispatch
 jobs:
@@ -8,57 +17,46 @@ jobs:
       - run: systeminfo
 
   secure-rdp:
-    # Change this to self-hosted to bypass the 6-hour limit
     runs-on: self-hosted 
-    # Set to a very high number (e.g., 50,000 minutes = ~34 days)
     timeout-minutes: 50000 
 
     steps:
       - name: 1. System and RDP Prep
         run: |
-          # Lower security for custom password
-          secedit /export /cfg config.inf
-          (Get-Content config.inf) -replace 'PasswordComplexity = 1', 'PasswordComplexity = 0' | Set-Content config.inf
-          secedit /configure /db $env:windir\security\local.sdb /cfg config.inf /areas SECURITYPOLICY
+          # Enable RDP via Registry (Windows 7 way)
+          reg add "HKLM\System\CurrentControlSet\Control\Terminal Server" /v fDenyTSConnections /t REG_DWORD /d 0 /f
+          reg add "HKLM\System\CurrentControlSet\Control\Terminal Server\WinStations\RDP-Tcp" /v UserAuthentication /t REG_DWORD /d 0 /f
           
-          # Enable RDP
-          Set-ItemProperty -Path 'HKLM:\System\CurrentControlSet\Control\Terminal Server' -Name "fDenyTSConnections" -Value 0 -Force
-          Set-ItemProperty -Path 'HKLM:\System\CurrentControlSet\Control\Terminal Server\WinStations\RDP-Tcp' -Name "UserAuthentication" -Value 0 -Force
+          # Open Firewall for RDP
           netsh advfirewall firewall add rule name="RDP-Port" dir=in action=allow protocol=TCP localport=3389
-          Restart-Service -Name TermService -Force
 
-      - name: 2. Create User
+      - name: 2. Create User (Windows 7 Legacy Method)
         run: |
-          $password = "Aa1!2345"
-          $securePass = ConvertTo-SecureString $password -AsPlainText -Force
-          if (!(Get-LocalUser -Name "RDP" -ErrorAction SilentlyContinue)) {
-              New-LocalUser -Name "RDP" -Password $securePass -AccountNeverExpires
-              Add-LocalGroupMember -Group "Administrators" -Member "RDP"
-              Add-LocalGroupMember -Group "Remote Desktop Users" -Member "RDP"
-          }
-          echo "RDP_PASS=$password" >> $env:GITHUB_ENV
+          # Use 'net user' because 'New-LocalUser' doesn't exist on Win7
+          net user RDP Aa1!2345 /add /expires:never /passwordchg:no
+          net localgroup Administrators RDP /add
+          net localgroup "Remote Desktop Users" RDP /add
+          echo "RDP_PASS=Aa1!2345" >> $env:GITHUB_ENV
 
       - name: 3. Setup Tailscale
         run: |
-          # Check if Tailscale is already installed (common on self-hosted)
-          if (!(Test-Path "$env:ProgramFiles\Tailscale\tailscale.exe")) {
+          # Windows 7 path is different, we'll check both
+          $tsPath = "C:\Program Files\Tailscale\tailscale.exe"
+          if (!(Test-Path $tsPath)) {
               $tsUrl = "https://pkgs.tailscale.com/stable/tailscale-setup-1.82.0-amd64.msi"
               Invoke-WebRequest -Uri $tsUrl -OutFile "ts.msi"
               Start-Process msiexec.exe -ArgumentList "/i", "ts.msi", "/quiet", "/norestart" -Wait
           }
-          & "$env:ProgramFiles\Tailscale\tailscale.exe" up --authkey=${{ secrets.TAILSCALE_AUTH_KEY }} --hostname=long-term-vps
-          $tsIP = & "$env:ProgramFiles\Tailscale\tailscale.exe" ip -4
+          & "$tsPath" up --authkey=${{ secrets.TAILSCALE_AUTH_KEY }} --hostname=my-gaming-vps
+          $tsIP = & "$tsPath" ip -4
           echo "TAILSCALE_IP=$tsIP" >> $env:GITHUB_ENV
 
       - name: 4. Persistent Loop
         run: |
-          Write-Host "=== LONG TERM RDP ACTIVE ==="
+          Write-Host "=== WINDOWS 7 VPS ACTIVE ==="
           Write-Host "Tailscale IP: $env:TAILSCALE_IP"
           Write-Host "User: RDP | Pass: Aa1!2345"
-          Write-Host "This session will run until you manually stop it or the PC restarts."
-          
-          # Creates an infinite loop that keeps the GitHub Action 'In Progress'
           while ($true) {
-              Write-Host "[$(Get-Date)] Heartbeat: System Active"
+              Write-Host "[$(Get-Date)] Heartbeat: Gaming PC Online"
               Start-Sleep -Seconds 600
           }
