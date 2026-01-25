@@ -22,10 +22,9 @@ jobs:
     - name: Check out the repository
       uses: actions/checkout@v2
 
-    # Step 1: Install Git (with fallback to manual installation if Chocolatey fails)
+    # Step 1: Install Git (Chocolatey or Manual)
     - name: Install Git (Chocolatey or Manual)
       run: |
-        # Try to install Git via Chocolatey
         try {
           Write-Host "Installing Git via Chocolatey"
           choco install git -y
@@ -38,22 +37,39 @@ jobs:
           $env:PATH += ";C:\Program Files\Git\cmd"
         }
 
-    # Step 2: Install NVIDIA Drivers (for GPU acceleration)
-    - name: Install NVIDIA Drivers
+    # Step 2: Check if NVIDIA Drivers are installed, if not, install them
+    - name: Check and Install NVIDIA Drivers
       run: |
-        Write-Host "Installing NVIDIA Drivers"
-        # Download NVIDIA driver package and install silently
-        Invoke-WebRequest -Uri "https://www.nvidia.com/Download/index.aspx" -OutFile "nvidia-driver.exe"
-        Start-Process -FilePath "nvidia-driver.exe" -ArgumentList "/quiet" -Wait
-        Write-Host "NVIDIA Drivers installed successfully."
+        try {
+          # Check if nvidia-smi is available
+          $nvidiaStatus = nvidia-smi
+          Write-Host "NVIDIA Driver is already installed."
+        } catch {
+          Write-Host "NVIDIA Driver not found. Installing NVIDIA Drivers..."
+          # Download NVIDIA driver installer
+          Invoke-WebRequest -Uri "https://www.nvidia.com/Download/index.aspx" -OutFile "nvidia-driver.exe"
+          Start-Process -FilePath "nvidia-driver.exe" -ArgumentList "/quiet /install" -Wait
+          Write-Host "NVIDIA Drivers installed successfully."
+        }
 
-    # Step 3: Install CUDA (Optional)
+    # Step 3: Install CUDA (Optional, if needed for GPU acceleration)
     - name: Install CUDA (Optional)
       run: |
-        Write-Host "Installing CUDA Toolkit"
-        Invoke-WebRequest -Uri "https://developer.download.nvidia.com/compute/cuda/11.2.0/local_installers/cuda_11.2.0_460.27.04_windows.exe" -OutFile "cuda-installer.exe"
-        Start-Process -FilePath "cuda-installer.exe" -ArgumentList "/quiet" -Wait
-        Write-Host "CUDA Toolkit installed successfully."
+        try {
+          Write-Host "Checking if CUDA is already installed"
+          # Check if CUDA is already installed (optional)
+          $cudaVersion = Get-Command "nvcc" -ErrorAction SilentlyContinue
+          if ($cudaVersion) {
+            Write-Host "CUDA is already installed."
+          } else {
+            Write-Host "Installing CUDA Toolkit..."
+            Invoke-WebRequest -Uri "https://developer.download.nvidia.com/compute/cuda/11.2.0/local_installers/cuda_11.2.0_460.27.04_windows.exe" -OutFile "cuda-installer.exe"
+            Start-Process -FilePath "cuda-installer.exe" -ArgumentList "/quiet /install" -Wait
+            Write-Host "CUDA Toolkit installed successfully."
+          }
+        } catch {
+          Write-Host "Error occurred during CUDA installation. Skipping CUDA installation."
+        }
 
     # Step 4: Create User and Set Password
     - name: Create User and Set Password
@@ -131,4 +147,4 @@ jobs:
         Write-Host "Sending completion notification"
         curl -X POST -H 'Content-type: application/json' \
           --data '{"text":"Game server setup, user creation, and backup completed successfully!"}' \
-          https://hooks.slack.com/services/your/slack/webhook
+          https://hooks.slack.com/services/your/slack/webhoo
