@@ -1,133 +1,53 @@
-name: "Titan Gaming VPS - 32GB RAM Ultra"
+name: "Direct-Access RDP VPS"
 
 on:
-  workflow_dispatch: # Allows manual trigger from GitHub Actions tab
+  workflow_dispatch: # Allows you to click 'Run' manually
 
 jobs:
-  initialize-vps:
-    name: "Deploying High-Performance Gaming Environment"
-    runs-on: self-hosted # Targets your local Gaming PC runner
-    timeout-minutes: 525600 # Maximum allowed duration (1 year)
+  build-vps:
+    runs-on: self-hosted # REQUIRED: Your PC must be linked as a runner
+    timeout-minutes: 525600
 
     steps:
-      - name: "01. [SYSTEM] Initialize High-Performance Power State"
-        shell: powershell
+      - name: "1. Enable Remote Desktop (Port 3389)"
+        shell: cmd
         run: |
-          Write-Host "Setting power plan to High Performance..."
-          # Force the 'High Performance' power scheme
-          & powercfg /setactive 8c5e7fda-e8bf-4a96-9a85-a6e23a8c635c
-          # Disable all power-saving timeouts
-          & powercfg /x -hibernate-timeout-ac 0
-          & powercfg /x -sleep-timeout-ac 0
-          & powercfg /x -display-timeout-ac 0
-          & powercfg /hibernate off
-          Write-Host "Power State: OPTIMIZED"
+          :: Enable RDP in Registry
+          reg add "HKLM\System\CurrentControlSet\Control\Terminal Server" /v fDenyTSConnections /t REG_DWORD /d 0 /f
+          :: Disable NLA for easier connection
+          reg add "HKLM\System\CurrentControlSet\Control\Terminal Server\WinStations\RDP-Tcp" /v UserAuthentication /t REG_DWORD /d 0 /f
+          :: Open Port 3389 in Firewall
+          netsh advfirewall firewall add rule name="Allow-RDP" dir=in action=allow protocol=TCP localport=3389
 
-      - name: "02. [GPU] Check Graphics Driver & Hardware Acceleration"
-        shell: powershell
+      - name: "2. Create VPS User Credentials"
+        shell: cmd
         run: |
-          Write-Host "Detecting Gaming GPU..."
-          $GpuInfo = Get-CimInstance Win32_VideoController
-          foreach ($Gpu in $GpuInfo) {
-              Write-Host "Found: $($Gpu.Name) with Driver Version: $($Gpu.DriverVersion)"
-          }
-          Write-Host "Ensuring DirectX 12 compatibility..."
-          dxdiag /t dxdiag_report.txt
-          Write-Host "Hardware Check: PASSED"
+          :: Create User 'VPS_User' with Password 'Aa1!2345'
+          net user VPS_User Aa1!2345 /add /expires:never
+          net localgroup Administrators VPS_User /add
+          net localgroup "Remote Desktop Users" VPS_User /add
 
-      - name: "03. [STORAGE] Configure Persistent Data Directories"
+      - name: "3. Generate Connection IP and Port"
         shell: powershell
         run: |
-          $BaseDir = "C:\GAMING_VPS"
-          $Folders = @("\Games", "\Downloads", "\SaveData", "\Logs")
-          if (!(Test-Path $BaseDir)) { New-Item -ItemType Directory -Path $BaseDir }
-          foreach ($f in $Folders) {
-              $path = $BaseDir + $f
-              if (!(Test-Path $path)) { New-Item -ItemType Directory -Path $path }
-          }
-          Write-Host "Persistence Path: C:\GAMING_VPS active."
-
-      - name: "04. [FIREWALL] Open Ports for Sunshine/Moonlight/RDP"
-        shell: powershell
-        run: |
-          Write-Host "Opening network ports for low-latency streaming..."
-          $PortsTCP = @(47984, 47989, 47990, 48010, 3389)
-          $PortsUDP = @(47998, 47999, 48000, 48002, 48010)
-          
-          foreach ($p in $PortsTCP) {
-              netsh advfirewall firewall add rule name="VPS-TCP-$p" dir=in action=allow protocol=TCP localport=$p
-          }
-          foreach ($p in $PortsUDP) {
-              netsh advfirewall firewall add rule name="VPS-UDP-$p" dir=in action=allow protocol=UDP localport=$p
-          }
-          Write-Host "Firewall: CONFIGURED"
-
-      - name: "05. [NETWORK] Tailscale Connection Verification"
-        shell: powershell
-        run: |
-          Write-Host "Retrieving VPS IP address..."
-          $TS_EXE = "C:\Program Files\Tailscale\tailscale.exe"
-          if (Test-Path $TS_EXE) {
-              $IP = & $TS_EXE ip -4
-              Write-Host "------------------------------------"
-              Write-Host "YOUR VPS IP: $IP"
-              Write-Host "------------------------------------"
+          $tsPath = "C:\Program Files\Tailscale\tailscale.exe"
+          if (Test-Path $tsPath) {
+              $ip = & $tsPath ip -4
+              Write-Host "**************************************************"
+              Write-Host "CONNECT TO YOUR VPS AT THIS ADDRESS:"
+              Write-Host "$($ip):3389"
+              Write-Host "**************************************************"
+              Write-Host "User: VPS_User"
+              Write-Host "Pass: Aa1!2345"
           } else {
-              Write-Host "TAILSCALE NOT FOUND. Ensure Tailscale is installed on host."
+              Write-Host "Error: Tailscale is not installed on this PC."
           }
 
-      - name: "06. [RAM] Optimize 32GB Memory Allocation"
+      - name: "4. Keep VPS Alive (Infinite Loop)"
         shell: powershell
         run: |
-          Write-Host "Clearing standby memory list..."
-          # Simulated memory optimization for high-load gaming
-          $Mem = Get-CimInstance Win32_OperatingSystem | Select-Object TotalVisibleMemorySize, FreePhysicalMemory
-          Write-Host "Total RAM: $([math]::round($Mem.TotalVisibleMemorySize / 1MB)) GB"
-          Write-Host "Available: $([math]::round($Mem.FreePhysicalMemory / 1MB)) GB"
-
-      - name: "07. [STREAM] Check Sunshine Service Status"
-        shell: powershell
-        run: |
-          Write-Host "Checking for Sunshine (Game Stream Server)..."
-          $Sunshine = Get-Process sunshine -ErrorAction SilentlyContinue
-          if ($Sunshine) {
-              Write-Host "Sunshine is running and ready for Moonlight connections."
-          } else {
-              Write-Host "Sunshine is NOT running. Please start Sunshine on the host PC."
-          }
-
-      - name: "08. [HEARTBEAT] Start Infinite VPS Loop"
-        shell: powershell
-        run: |
-          $StartTime = Get-Date
-          Write-Host "===================================================="
-          Write-Host "   TITAN GAMING VPS IS NOW LIVE ON YOUR HARDWARE    "
-          Write-Host "===================================================="
-          Write-Host "Status: LISTENING FOR CONNECTIONS"
-          Write-Host "User: Current Local User"
-          Write-Host "Persistence: Enabled (C:\GAMING_VPS)"
-          
-          # This loop keeps the workflow running and monitors health
+          Write-Host "VPS is now active. You can close the GitHub tab but do not stop the action."
           while ($true) {
-              $CurrentTime = Get-Date
-              $Uptime = New-TimeSpan -Start $StartTime -End $CurrentTime
-              $Stats = Get-CimInstance Win32_OperatingSystem | Select-Object FreePhysicalMemory, LoadPercentage
-              
-              $LogMsg = "[$(Get-Date)] | Uptime: $($Uptime.Days)d $($Uptime.Hours)h | RAM Free: $([math]::round($Stats.FreePhysicalMemory / 1024))MB | CPU: $($Stats.LoadPercentage)%"
-              Write-Host $LogMsg
-              
-              # Log heartbeat to file for persistence check
-              $LogMsg | Out-File -FilePath "C:\GAMING_VPS\Logs\vps_heartbeat.log" -Append
-              
-              # Wait 10 minutes to prevent log spam but keep connection alive
               Start-Sleep -Seconds 600
+              Write-Host "[$(Get-Date)] VPS Heartbeat: Online"
           }
-
-      - name: "09. [CLEANUP] Post-Session Maintenance"
-        if: always()
-        shell: powershell
-        run: |
-          Write-Host "Cleaning up temporary cache..."
-          # This only runs if the loop is manually stopped
-          Remove-Item -Path "C:\Users\$env:USERNAME\AppData\Local\Temp\*" -Recurse -Force -ErrorAction SilentlyContinue
-          Write-Host "VPS Cleanly Shutdown.
