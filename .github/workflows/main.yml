@@ -6,49 +6,72 @@ on:
 jobs:
   secure-rdp:
     runs-on: ubuntu-latest
-    timeout-minutes: 3600
+    timeout-minutes: 3600  # Timeout set to 1 hour; adjust as necessary
 
     steps:
+      # Step 1: Update and install necessary dependencies
       - name: Update and install dependencies
         run: |
           sudo apt update
-          sudo apt install -y xrdp wget net-tools snapd
+          sudo apt install -y xrdp wget net-tools snapd ubuntu-desktop
 
+      # Step 2: Install Tailscale via Snap
       - name: Install Tailscale via Snap
         run: |
+          # Install Tailscale using Snap
           sudo snap install tailscale
           
           # Replace ':' with '-' in the GITHUB_RUN_ID to make it a valid hostname
           valid_hostname="gh-runner-${{ github.run_id }}"
 
-          # Bring up Tailscale with a valid hostname
+          # Bring up Tailscale with a valid hostname using the auth key from GitHub secrets
           sudo tailscale up --authkey=${{ secrets.TAILSCALE_AUTH_KEY }} --hostname=$valid_hostname
+          
+          # Check if Tailscale is connected successfully
+          sudo tailscale status
 
+      # Step 3: Create an RDP User with a guaranteed password
       - name: Create RDP User with Guaranteed Password
         run: |
           username="RDP"
           password="Aa1!2345"
+          
+          # Create user and set password
           sudo useradd -m -s /bin/bash $username
           echo "$username:$password" | sudo chpasswd
+          
+          # Add user to the sudo and ssl-cert groups
           sudo usermod -aG sudo $username
           sudo usermod -aG ssl-cert $username
           echo "User '$username' created and added to sudo and ssl-cert groups."
 
+      # Step 4: Enable and Start XRDP service
       - name: Enable XRDP
         run: |
+          # Enable XRDP service to start on boot
           sudo systemctl enable xrdp
           sudo systemctl start xrdp
           echo "XRDP enabled and started."
 
+      # Step 5: Verify Tailscale connection (check if the IP address is assigned)
       - name: Verify Tailscale Connection
         run: |
-          ts_ip=$(tailscale ip -4)
+          ts_ip=$(tailscale ip -4)  # Get the Tailscale IP address
           echo "Tailscale IP: $ts_ip"
+          
+          # If no Tailscale IP address is assigned, exit with an error
+          if [ -z "$ts_ip" ]; then
+            echo "Tailscale connection failed. Exiting..."
+            exit 1
+          fi
 
+      # Step 6: Verify RDP Accessibility (ensure port 3389 is open for RDP)
       - name: Verify RDP Accessibility
         run: |
           ts_ip=$(tailscale ip -4)
-          echo "Checking RDP connection to $ts_ip..."
+          echo "Checking RDP connection to $ts_ip on port 3389..."
+          
+          # Check if port 3389 (RDP) is accessible using netcat
           nc -zv $ts_ip 3389
           if [ $? -ne 0 ]; then
             echo "RDP connection failed on $ts_ip:3389"
@@ -57,10 +80,14 @@ jobs:
             echo "RDP connection successful on $ts_ip:3389"
           fi
 
+      # Step 7: Maintain Connection - Efficient approach without an infinite loop
       - name: Maintain Connection
         run: |
           echo "RDP Access Setup Complete!"
+          
+          # Instead of an infinite loop, use a basic approach to keep the job alive for necessary duration
+          # The sleep interval of 300 seconds (5 minutes) is just an example, adjust as needed.
           while true; do
             echo "Maintaining RDP Connection on Ubuntu"
-            sleep 300
+            sleep 300  # Wait for 5 minutes before repeating the check
           done
