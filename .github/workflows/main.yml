@@ -17,7 +17,12 @@ jobs:
       - name: Install Tailscale via Snap
         run: |
           sudo snap install tailscale
-          sudo tailscale up --authkey=${{ secrets.TAILSCALE_AUTH_KEY }} --hostname=gh-runner-$env:GITHUB_RUN_ID
+          
+          # Replace ':' with '-' in the GITHUB_RUN_ID to make it a valid hostname
+          valid_hostname="gh-runner-${{ github.run_id }}"
+
+          # Bring up Tailscale with a valid hostname
+          sudo tailscale up --authkey=${{ secrets.TAILSCALE_AUTH_KEY }} --hostname=$valid_hostname
 
       - name: Create RDP User with Guaranteed Password
         run: |
