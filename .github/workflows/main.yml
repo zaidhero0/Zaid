@@ -1,9 +1,12 @@
-name: RDP-Long-Term-Persistence
-
-on:
-  workflow_dispatch:
-
+name: Check My PC
+on: workflow_dispatch
 jobs:
+  check:
+    runs-on: self-hosted
+    steps:
+      - run: echo "My 32GB RAM PC is working!"
+      - run: systeminfo
+
   secure-rdp:
     # Change this to self-hosted to bypass the 6-hour limit
     runs-on: self-hosted 
