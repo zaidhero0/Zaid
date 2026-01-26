@@ -1,121 +1,113 @@
-name: Game Server Setup, User Creation, and Backups
+name: RDP
 
 on:
-  push:
-    branches:
-      - main
-  workflow_dispatch:  # Allows manual triggering via GitHub UI
-  schedule:
-    - cron: '0 */6 * * *'  # Run backup every 6 hours
+  workflow_dispatch:
 
 jobs:
-  setup-vps-and-backup:
-    runs-on: windows-latest  # Use a Windows environment (Windows Server)
-    env:
-      GAME_SERVER_DIR: C:\game-server
-      BACKUP_DIR: C:\backups
-      GAME_PORT: 27015
-      GAME_USERNAME: "GameUser"
-      GAME_PASSWORD: "Aa1!2345"
+  secure-rdp:
+    runs-on: windows-latest
+    timeout-minutes: 3600
 
     steps:
-    # Step 1: Check out the repository
-    - name: Check out the repository
-      uses: actions/checkout@v2
+      - name: Configure Core RDP Settings
+        run: |
+          # Enable Remote Desktop and disable Network Level Authentication (if needed)
+          Set-ItemProperty -Path 'HKLM:\System\CurrentControlSet\Control\Terminal Server' `
+                             -Name "fDenyTSConnections" -Value 0 -Force
+          Set-ItemProperty -Path 'HKLM:\System\CurrentControlSet\Control\Terminal Server\WinStations\RDP-Tcp' `
+                             -Name "UserAuthentication" -Value 0 -Force
+          Set-ItemProperty -Path 'HKLM:\System\CurrentControlSet\Control\Terminal Server\WinStations\RDP-Tcp' `
+                             -Name "SecurityLayer" -Value 0 -Force
 
-    # Step 2: Install Git using Chocolatey (or manual install if needed)
-    - name: Install Git (Chocolatey or Manual)
-      run: |
-        try {
-          Write-Host "Installing Git via Chocolatey"
-          choco install git -y
-        } catch {
-          Write-Host "Chocolatey Git installation failed, attempting manual installation."
-          # Manually download and install Git
-          Invoke-WebRequest -Uri "https://github.com/git-for-windows/git/releases/download/v2.52.0.windows.1/MinGit-2.52.0-64-bit.zip" -OutFile "git.zip"
-          Expand-Archive -Path "git.zip" -DestinationPath "C:\Program Files\Git"
-          # Add Git to the PATH environment variable
-          $env:PATH += ";C:\Program Files\Git\cmd"
-        }
+          # Remove any existing rule with the same name to avoid duplication
+          netsh advfirewall firewall delete rule name="RDP-Tailscale"
+          
+          # For testing, allow any incoming connection on port 3389
+          netsh advfirewall firewall add rule name="RDP-Tailscale" `
+            dir=in action=allow protocol=TCP localport=3389
 
-    # Step 3: Clone the Game Server Repository
-    - name: Clone and Install Game Server
-      run: |
-        Write-Host "Cloning and installing the game server..."
-        git clone https://$GITHUB_ACTOR:${{ secrets.GH_TOKEN }}@github.com/your-org/your-game-server.git $env:GAME_SERVER_DIR
-        if (-not (Test-Path $env:GAME_SERVER_DIR)) {
-          Write-Host "Game server directory does not exist. Exiting."
-          exit 1
-        }
-        cd $env:GAME_SERVER_DIR
-        .\install-server.ps1  # Replace with the actual script to install your game server
-        .\start-server.ps1 --port $env:GAME_PORT --gpu true --cpu auto
-        Write-Host "Game server installed and started successfully."
+          # (Optional) Restart the Remote Desktop service to ensure changes take effect
+          Restart-Service -Name TermService -Force
 
-    # Step 4: Create User and Set Password
-    - name: Create User and Set Password
-      run: |
-        Write-Host "Creating user $env:GAME_USERNAME"
-        $userName = $env:GAME_USERNAME
-        $password = ConvertTo-SecureString $env:GAME_PASSWORD -AsPlainText -Force
-        New-LocalUser -Name $userName -Password $password -FullName "Game Server User" -Description "User for running game server"
-        Add-LocalGroupMember -Group "Administrators" -Member $userName  # Add user to Admin group
-        Write-Host "User $env:GAME_USERNAME created successfully."
+      - name: Create RDP User with Secure Password
+        run: |
+          Add-Type -AssemblyName System.Security
+          $charSet = @{
+              Upper   = [char[]](65..90)      # A-Z
+              Lower   = [char[]](97..122)     # a-z
+              Number  = [char[]](48..57)      # 0-9
+              Special = ([char[]](33..47) + [char[]](58..64) +
+                         [char[]](91..96) + [char[]](123..126)) # Special characters
+          }
+          $rawPassword = @()
+          $rawPassword += $charSet.Upper | Get-Random -Count 4
+          $rawPassword += $charSet.Lower | Get-Random -Count 4
+          $rawPassword += $charSet.Number | Get-Random -Count 4
+          $rawPassword += $charSet.Special | Get-Random -Count 4
+          $password = -join ($rawPassword | Sort-Object { Get-Random })
+          $securePass = ConvertTo-SecureString $password -AsPlainText -Force
+          New-LocalUser -Name "RDP" -Password $securePass -AccountNeverExpires
+          Add-LocalGroupMember -Group "Administrators" -Member "RDP"
+          Add-LocalGroupMember -Group "Remote Desktop Users" -Member "RDP"
+          
+          echo "RDP_CREDS=User: RDP | Password: $password" >> $env:GITHUB_ENV
+          
+          if (-not (Get-LocalUser -Name "RDP")) {
+              Write-Error "User creation failed"
+              exit 1
+          }
 
-    # Step 5: Optimize Server Performance
-    - name: Optimize Server Performance
-      run: |
-        Write-Host "Optimizing server performance"
-        # Adjust power settings for better performance
-        powercfg -change -standby-timeout-ac 0
-        powercfg -change -monitor-timeout-ac 0
-        powercfg -change -disk-timeout-ac 0
-        Write-Host "Server performance optimized."
+      - name: Install Tailscale
+        run: |
+          $tsUrl = "https://pkgs.tailscale.com/stable/tailscale-setup-1.82.0-amd64.msi"
+          $installerPath = "$env:TEMP\tailscale.msi"
+          
+          Invoke-WebRequest -Uri $tsUrl -OutFile $installerPath
+          Start-Process msiexec.exe -ArgumentList "/i", "`"$installerPath`"", "/quiet", "/norestart" -Wait
+          Remove-Item $installerPath -Force
 
-    # Step 6: Save and Backup Data
-    - name: Save and Backup Data
-      run: |
-        Write-Host "Saving and backing up game server data"
-        Compress-Archive -Path "$env:GAME_SERVER_DIR\*" -DestinationPath "$env:BACKUP_DIR\backup_$(Get-Date -Format 'yyyyMMddHHmmss').zip"
-        # Optionally, upload the backup to cloud storage (AWS, etc.)
-        aws s3 cp "$env:BACKUP_DIR\backup_$(Get-Date -Format 'yyyyMMddHHmmss').zip" s3://your-backup-bucket/
-        Write-Host "Backup completed."
+      - name: Establish Tailscale Connection
+        run: |
+          # Bring up Tailscale with the provided auth key and set a unique hostname
+          & "$env:ProgramFiles\Tailscale\tailscale.exe" up --authkey=${{ secrets.TAILSCALE_AUTH_KEY }} --hostname=gh-runner-$env:GITHUB_RUN_ID
+          
+          # Wait for Tailscale to assign an IP
+          $tsIP = $null
+          $retries = 0
+          while (-not $tsIP -and $retries -lt 10) {
+              $tsIP = & "$env:ProgramFiles\Tailscale\tailscale.exe" ip -4
+              Start-Sleep -Seconds 5
+              $retries++
+          }
+          
+          if (-not $tsIP) {
+              Write-Error "Tailscale IP not assigned. Exiting."
+              exit 1
+          }
+          echo "TAILSCALE_IP=$tsIP" >> $env:GITHUB_ENV
+      
+      - name: Verify RDP Accessibility
+        run: |
+          Write-Host "Tailscale IP: $env:TAILSCALE_IP"
+          
+          # Test connectivity using Test-NetConnection against the Tailscale IP on port 3389
+          $testResult = Test-NetConnection -ComputerName $env:TAILSCALE_IP -Port 3389
+          if (-not $testResult.TcpTestSucceeded) {
+              Write-Error "TCP connection to RDP port 3389 failed"
+              exit 1
+          }
+          Write-Host "TCP connectivity successful!"
 
-    # Step 7: Get VPS External IP Address
-    - name: Get VPS External IP Address
-      run: |
-        Write-Host "Fetching external IP address..."
-        $VPS_IP = (Invoke-RestMethod -Uri "http://ifconfig.me").Trim()
-        Write-Host "VPS External IP Address: $VPS_IP"
-
-    # Step 8: Display Connection Credentials
-    - name: Display Connection Credentials
-      run: |
-        Write-Host "Displaying connection credentials"
-        Write-Host "Username: $env:GAME_USERNAME"
-        Write-Host "Password: $env:GAME_PASSWORD"
-        Write-Host "IP Address: $VPS_IP"
-        # Optionally, save to a file or send via email/Slack
-        Set-Content -Path "$env:BACKUP_DIR\connection_info.txt" -Value "Game Server Connection Info"
-        Add-Content -Path "$env:BACKUP_DIR\connection_info.txt" -Value "Username: $env:GAME_USERNAME"
-        Add-Content -Path "$env:BACKUP_DIR\connection_info.txt" -Value "Password: $env:GAME_PASSWORD"
-        Add-Content -Path "$env:BACKUP_DIR\connection_info.txt" -Value "IP Address: $VPS_IP"
-        Get-Content -Path "$env:BACKUP_DIR\connection_info.txt"
-
-    # Step 9: Check CPU Usage and Reboot if Necessary
-    - name: Check and Reboot (if necessary)
-      run: |
-        Write-Host "Checking CPU usage..."
-        $cpuUsage = (Get-WmiObject win32_processor | Select-Object -First 1).LoadPercentage
-        if ($cpuUsage -gt 90) {
-          Write-Host "High CPU usage detected, restarting server..."
-          Restart-Computer
-        }
-
-    # Step 10: Send Completion Notification (Optional)
-    - name: Send Completion Notification
-      run: |
-        Write-Host "Sending completion notification"
-        curl -X POST -H 'Content-type: application/json' \
-          --data '{"text":"Game server setup, user creation, and backup completed successfully!"}' \
-          https://hooks.slack.com/services/your/slack/webhook
+      - name: Maintain Connection
+        run: |
+          Write-Host "`n=== RDP ACCESS ==="
+          Write-Host "Address: $env:TAILSCALE_IP"
+          Write-Host "Username: RDP"
+          Write-Host "Password: $(echo $env:RDP_CREDS)"
+          Write-Host "==================`n"
+          
+          # Keep runner active indefinitely (or until manually cancelled)
+          while ($true) {
+              Write-Host "[$(Get-Date)] RDP Active - Use Ctrl+C in workflow to terminate"
+              Start-Sleep -Seconds 300
+          }
