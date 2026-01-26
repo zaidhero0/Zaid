@@ -1,14 +1,29 @@
-name: RDP
+name: RDP with Residential IP
 
 on:
   workflow_dispatch:
 
 jobs:
   secure-rdp:
-    runs-on: windows-latest
+    runs-on: windows-2022  # Windows Server 2022 (closest to Windows 11)
+
     timeout-minutes: 3600
 
     steps:
+      - name: Set Up Residential Proxy
+        run: |
+          # Set proxy environment variables
+          echo "HTTP_PROXY=http://your_proxy_ip:your_proxy_port" >> $GITHUB_ENV
+          echo "HTTPS_PROXY=http://your_proxy_ip:your_proxy_port" >> $GITHUB_ENV
+          echo "HTTP_PROXY_USER=your_proxy_username" >> $GITHUB_ENV
+          echo "HTTP_PROXY_PASS=your_proxy_password" >> $GITHUB_ENV
+          
+          # Optionally, set environment variable to use the proxy for all system commands
+          [System.Environment]::SetEnvironmentVariable('HTTP_PROXY', $env:HTTP_PROXY, [System.EnvironmentVariableTarget]::Machine)
+          [System.Environment]::SetEnvironmentVariable('HTTPS_PROXY', $env:HTTPS_PROXY, [System.EnvironmentVariableTarget]::Machine)
+          [System.Environment]::SetEnvironmentVariable('HTTP_PROXY_USER', $env:HTTP_PROXY_USER, [System.EnvironmentVariableTarget]::Machine)
+          [System.Environment]::SetEnvironmentVariable('HTTP_PROXY_PASS', $env:HTTP_PROXY_PASS, [System.EnvironmentVariableTarget]::Machine)
+
       - name: Configure Core RDP Settings
         run: |
           # Enable Remote Desktop and disable Network Level Authentication (if needed)
@@ -59,6 +74,7 @@ jobs:
 
       - name: Install Tailscale
         run: |
+          # Download and install Tailscale
           $tsUrl = "https://pkgs.tailscale.com/stable/tailscale-setup-1.82.0-amd64.msi"
           $installerPath = "$env:TEMP\tailscale.msi"
           
@@ -68,9 +84,9 @@ jobs:
 
       - name: Establish Tailscale Connection
         run: |
-          # Bring up Tailscale with the provided auth key and set a unique hostname
-          & "$env:ProgramFiles\Tailscale\tailscale.exe" up --authkey=${{ secrets.TAILSCALE_AUTH_KEY }} --hostname=gh-runner-$env:GITHUB_RUN_ID
-          
+          # Bring up Tailscale in background to keep the connection persistent
+          Start-Process -NoNewWindow -FilePath "$env:ProgramFiles\Tailscale\tailscale.exe" -ArgumentList "up", "--authkey=${{ secrets.TAILSCALE_AUTH_KEY }}", "--hostname=gh-runner-$env:GITHUB_RUN_ID"
+
           # Wait for Tailscale to assign an IP
           $tsIP = $null
           $retries = 0
@@ -85,7 +101,7 @@ jobs:
               exit 1
           }
           echo "TAILSCALE_IP=$tsIP" >> $env:GITHUB_ENV
-      
+
       - name: Verify RDP Accessibility
         run: |
           Write-Host "Tailscale IP: $env:TAILSCALE_IP"
