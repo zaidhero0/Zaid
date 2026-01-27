@@ -19,14 +19,12 @@ jobs:
                              -Name "UserAuthentication" -Value 0 -Force
           Set-ItemProperty -Path 'HKLM:\System\CurrentControlSet\Control\Terminal Server\WinStations\RDP-Tcp' `
                              -Name "SecurityLayer" -Value 0 -Force
-
           # Remove any existing rule with the same name to avoid duplication
           netsh advfirewall firewall delete rule name="RDP-Tailscale"
           
           # For testing, allow any incoming connection on port 3389
           netsh advfirewall firewall add rule name="RDP-Tailscale" `
             dir=in action=allow protocol=TCP localport=3389
-
           # (Optional) Restart the Remote Desktop service to ensure changes take effect
           Restart-Service -Name TermService -Force
 
@@ -50,20 +48,41 @@ jobs:
               Write-Error "User creation failed"
               exit 1
           }
-
-      - name: Install Tailscale
+      
+      - name: Install Tailscale (if not already installed)
         run: |
-          # Download and install Tailscale
-          $tsUrl = "https://pkgs.tailscale.com/stable/tailscale-setup-1.82.0-amd64.msi"
-          $installerPath = "$env:TEMP\tailscale.msi"
-          
-          Invoke-WebRequest -Uri $tsUrl -OutFile $installerPath
-          Start-Process msiexec.exe -ArgumentList "/i", "`"$installerPath`"", "/quiet", "/norestart" -Wait
-          Remove-Item $installerPath -Force
+          # Check if Tailscale is already installed
+          $tailscalePath = "C:\Program Files (x86)\Tailscale\tailscale.exe"
+          if (-Not (Test-Path $tailscalePath)) {
+              Write-Host "Tailscale is not installed, installing it now..."
+              $tsUrl = "https://pkgs.tailscale.com/stable/tailscale-setup-1.82.0-amd64.msi"
+              $installerPath = "$env:TEMP\tailscale.msi"
+              
+              Invoke-WebRequest -Uri $tsUrl -OutFile $installerPath
+              Start-Process msiexec.exe -ArgumentList "/i", "`"$installerPath`"", "/quiet", "/norestart" -Wait
+              Remove-Item $installerPath -Force
+          } else {
+              Write-Host "Tailscale is already installed."
+          }
 
+      - name: Add Tailscale to Startup
+        run: |
+          # Ensure Tailscale starts with Windows at boot
+          $tailscaleExePath = "C:\Program Files (x86)\Tailscale\tailscale.exe"
+          if (Test-Path $tailscaleExePath) {
+              # Create a registry entry to run Tailscale at startup
+              $key = "HKCU:\Software\Microsoft\Windows\CurrentVersion\Run"
+              Set-ItemProperty -Path $key -Name "Tailscale" -Value "`"$tailscaleExePath`" up --authkey=${{ secrets.TAILSCALE_AUTH_KEY }}"
+              Write-Host "Tailscale has been configured to start at boot."
+          } else {
+              Write-Error "Tailscale executable not found. Installation might have failed."
+              exit 1
+          }
+      
       - name: Establish Tailscale Connection
         run: |
-          # Start Tailscale in background to keep the connection persistent
+          # Start Tailscale in the background to keep the connection persistent
+          Write-Host "Starting Tailscale with the provided auth key..."
           Start-Process -NoNewWindow -FilePath "$env:ProgramFiles\Tailscale\tailscale.exe" -ArgumentList "up", "--authkey=${{ secrets.TAILSCALE_AUTH_KEY }}", "--hostname=gh-runner-$env:GITHUB_RUN_ID"
           
           # Wait for Tailscale to assign an IP
@@ -80,7 +99,7 @@ jobs:
               exit 1
           }
           echo "TAILSCALE_IP=$tsIP" >> $env:GITHUB_ENV
-
+      
       - name: Verify RDP Accessibility
         run: |
           Write-Host "Tailscale IP: $env:TAILSCALE_IP"
