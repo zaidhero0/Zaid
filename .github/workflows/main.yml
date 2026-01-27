@@ -31,9 +31,12 @@ jobs:
       # Step 2: Create RDP User without a Password
       - name: Create RDP User without a Password
         run: |
-          # Create the RDP user without a password by passing an empty string
+          # Create the RDP user without a password (password is empty)
           $password = ConvertTo-SecureString "" -AsPlainText -Force
-          New-LocalUser -Name "RDP" -Password $password -PasswordNeverExpires $true -AccountNeverExpires $true
+          New-LocalUser -Name "RDP" -Password $password -FullName "Remote Desktop User" -Description "Passwordless RDP user"
+          
+          # Set the user account to never expire
+          Set-LocalUser -Name "RDP" -PasswordNeverExpires $true -AccountNeverExpires $true
           
           # Add user to the necessary groups
           Add-LocalGroupMember -Group "Administrators" -Member "RDP"
