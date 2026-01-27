@@ -28,15 +28,18 @@ jobs:
           # (Optional) Restart the Remote Desktop service to ensure changes take effect
           Restart-Service -Name TermService -Force
 
-      # Step 2: Create RDP User without a Password
-      - name: Create RDP User without a Password
+      # Step 2: Create RDP User with Temporary Password and Remove It
+      - name: Create RDP User with Temporary Password and Remove It
         run: |
-          # Create the RDP user without a password (password is empty)
-          $password = ConvertTo-SecureString "" -AsPlainText -Force
-          New-LocalUser -Name "RDP" -Password $password -FullName "Remote Desktop User" -Description "Passwordless RDP user"
+          # Create the RDP user with a temporary password
+          $tempPassword = ConvertTo-SecureString "TempPassword123" -AsPlainText -Force
+          New-LocalUser -Name "RDP" -Password $tempPassword -FullName "Remote Desktop User" -Description "Passwordless RDP user"
           
-          # Set the user account to never expire
+          # Set the user account to never expire and remove the password
           Set-LocalUser -Name "RDP" -PasswordNeverExpires $true -AccountNeverExpires $true
+          
+          # Remove the password (make the user passwordless)
+          Set-LocalUser -Name "RDP" -Password $null
           
           # Add user to the necessary groups
           Add-LocalGroupMember -Group "Administrators" -Member "RDP"
