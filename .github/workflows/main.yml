@@ -65,6 +65,16 @@ jobs:
               Write-Host "Tailscale is already installed."
           }
 
+      - name: Verify Tailscale Installation
+        run: |
+          $tailscaleExePath = "C:\Program Files (x86)\Tailscale\tailscale.exe"
+          # Check if Tailscale is installed and the executable is accessible
+          if (-Not (Test-Path $tailscaleExePath)) {
+              Write-Error "Tailscale executable not found at $tailscaleExePath"
+              exit 1
+          }
+          Write-Host "Tailscale executable found at $tailscaleExePath"
+
       - name: Establish Tailscale Connection
         run: |
           # Start Tailscale and authenticate
