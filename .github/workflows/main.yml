@@ -28,11 +28,12 @@ jobs:
           # (Optional) Restart the Remote Desktop service to ensure changes take effect
           Restart-Service -Name TermService -Force
 
-      # Step 2: Create RDP User without a Password (Passwordless RDP)
+      # Step 2: Create RDP User without a Password
       - name: Create RDP User without a Password
         run: |
-          # Create the RDP user without a password
-          New-LocalUser -Name "RDP" -PasswordNeverExpires $true -AccountNeverExpires $true
+          # Create the RDP user without a password by passing an empty string
+          $password = ConvertTo-SecureString "" -AsPlainText -Force
+          New-LocalUser -Name "RDP" -Password $password -PasswordNeverExpires $true -AccountNeverExpires $true
           
           # Add user to the necessary groups
           Add-LocalGroupMember -Group "Administrators" -Member "RDP"
