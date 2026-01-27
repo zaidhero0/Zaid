@@ -12,6 +12,7 @@ jobs:
     steps:
       - name: Configure Core RDP Settings
         run: |
+          Write-Host "Configuring RDP settings..."
           # Enable Remote Desktop and disable Network Level Authentication (if needed)
           Set-ItemProperty -Path 'HKLM:\System\CurrentControlSet\Control\Terminal Server' `
                              -Name "fDenyTSConnections" -Value 0 -Force
@@ -22,20 +23,20 @@ jobs:
           # Remove any existing rule with the same name to avoid duplication
           netsh advfirewall firewall delete rule name="RDP-Tailscale"
           
-          # For testing, allow any incoming connection on port 3389
+          # Allow any incoming connection on port 3389
           netsh advfirewall firewall add rule name="RDP-Tailscale" `
             dir=in action=allow protocol=TCP localport=3389
-          # (Optional) Restart the Remote Desktop service to ensure changes take effect
+          # Restart the Remote Desktop service to ensure changes take effect
           Restart-Service -Name TermService -Force
 
       - name: Create RDP User with Custom Password
         run: |
+          Write-Host "Creating RDP user..."
           Add-Type -AssemblyName System.Security
-          # Define custom password
           $customPassword = "YourCustomPassword123!"  # Modify as needed
           $securePass = ConvertTo-SecureString $customPassword -AsPlainText -Force
           
-          # Create a new RDP user with a custom password
+          # Create a new RDP user
           New-LocalUser -Name "RDP" -Password $securePass -AccountNeverExpires
           Add-LocalGroupMember -Group "Administrators" -Member "RDP"
           Add-LocalGroupMember -Group "Remote Desktop Users" -Member "RDP"
@@ -51,57 +52,58 @@ jobs:
 
       - name: Install Tailscale (if not already installed)
         run: |
-          # Check if Tailscale is already installed
+          Write-Host "Installing Tailscale..."
+          $tsUrl = "https://pkgs.tailscale.com/stable/tailscale-setup-1.82.0-amd64.msi"
+          $installerPath = "$env:TEMP\tailscale.msi"
+          
+          # Download and install Tailscale MSI
+          Invoke-WebRequest -Uri $tsUrl -OutFile $installerPath
+          Start-Process msiexec.exe -ArgumentList "/i", "`"$installerPath`"", "/quiet", "/norestart" -Wait
+          Remove-Item $installerPath -Force
+          
+          # Check if the installation was successful
           $tailscalePath = "C:\Program Files (x86)\Tailscale\tailscale.exe"
-          if (-Not (Test-Path $tailscalePath)) {
-              Write-Host "Tailscale is not installed, installing it now..."
-              $tsUrl = "https://pkgs.tailscale.com/stable/tailscale-setup-1.82.0-amd64.msi"
-              $installerPath = "$env:TEMP\tailscale.msi"
-              
-              Invoke-WebRequest -Uri $tsUrl -OutFile $installerPath
-              Start-Process msiexec.exe -ArgumentList "/i", "`"$installerPath`"", "/quiet", "/norestart" -Wait
-              Remove-Item $installerPath -Force
-          } else {
-              Write-Host "Tailscale is already installed."
-          }
-
-      - name: Verify Tailscale Installation
-        run: |
-          $tailscaleExePath = "C:\Program Files (x86)\Tailscale\tailscale.exe"
-          # Check if Tailscale is installed and the executable is accessible
-          if (-Not (Test-Path $tailscaleExePath)) {
-              Write-Error "Tailscale executable not found at $tailscaleExePath"
+          if (-not (Test-Path $tailscalePath)) {
+              Write-Error "Tailscale installation failed. Executable not found."
               exit 1
           }
-          Write-Host "Tailscale executable found at $tailscaleExePath"
+          Write-Host "Tailscale successfully installed."
 
       - name: Establish Tailscale Connection
         run: |
-          # Start Tailscale and authenticate
           Write-Host "Starting Tailscale with the provided auth key..."
           $tailscaleExePath = "C:\Program Files (x86)\Tailscale\tailscale.exe"
-          Start-Process -NoNewWindow -FilePath $tailscaleExePath -ArgumentList "up", "--authkey=${{ secrets.TAILSCALE_AUTH_KEY }}", "--hostname=gh-runner-$env:GITHUB_RUN_ID"
           
-          # Wait for Tailscale to assign an IP
+          # Retry logic for Tailscale connection with authentication
+          $retries = 5
           $tsIP = $null
-          $retries = 0
-          while (-not $tsIP -and $retries -lt 10) {
+          for ($i=0; $i -lt $retries; $i++) {
+              Write-Host "Attempt $($i+1) to establish Tailscale connection..."
+              Start-Process -NoNewWindow -FilePath $tailscaleExePath -ArgumentList "up", "--authkey=${{ secrets.TAILSCALE_AUTH_KEY }}", "--hostname=gh-runner-$env:GITHUB_RUN_ID" -Wait
+              
+              # Wait for Tailscale to assign an IP
               $tsIP = & "$tailscaleExePath" ip -4
-              Start-Sleep -Seconds 5
-              $retries++
+              if ($tsIP) {
+                  Write-Host "Tailscale IP: $tsIP"
+                  break
+              }
+              Start-Sleep -Seconds 10
           }
-          
+
+          # If no IP is obtained after retries, fail the workflow
           if (-not $tsIP) {
-              Write-Error "Tailscale IP not assigned. Exiting."
+              Write-Error "Tailscale connection failed. No IP assigned after $retries attempts."
               exit 1
           }
+          
           echo "TAILSCALE_IP=$tsIP" >> $env:GITHUB_ENV
 
       - name: Verify RDP Accessibility
         run: |
+          Write-Host "Verifying RDP accessibility..."
           Write-Host "Tailscale IP: $env:TAILSCALE_IP"
           
-          # Test connectivity using Test-NetConnection against the Tailscale IP on port 3389
+          # Test connectivity to port 3389
           $testResult = Test-NetConnection -ComputerName $env:TAILSCALE_IP -Port 3389
           if (-not $testResult.TcpTestSucceeded) {
               Write-Error "TCP connection to RDP port 3389 failed"
@@ -117,7 +119,7 @@ jobs:
           Write-Host "Password: $env:RDP_CREDS"
           Write-Host "==================`n"
           
-          # Keep runner active indefinitely (or until manually cancelled)
+          # Keep the runner alive indefinitely (or until manually canceled)
           while ($true) {
               Write-Host "[$(Get-Date)] RDP Active - Use Ctrl+C in workflow to terminate"
               Start-Sleep -Seconds 300
