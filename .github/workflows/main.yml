@@ -23,8 +23,12 @@ jobs:
           nproc=$(nproc)
           echo "Using $nproc cores"
 
-          # Simple CPU load for testing (6 minutes)
-          timeout 360s bash -c "for i in $(seq 1 $nproc); do yes > /dev/null & done; wait"
+          # Start a CPU load on all cores for 6 minutes
+          for i in $(seq 1 $nproc); do
+            yes > /dev/null &
+          done
+          sleep 360
+          killall yes
 
       - name: List Disk & Memory
         run: |
@@ -40,4 +44,3 @@ jobs:
             echo "[$(date)] Runner alive..."
             sleep 60
           done
-
