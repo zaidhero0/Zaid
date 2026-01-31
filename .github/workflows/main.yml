@@ -1,21 +1,21 @@
-name: CPU Gaming Runner
+name: Gaming-Like Runner
 
 on:
   workflow_dispatch:
 
 jobs:
-  cpu-gaming:
+  gui-runner:
     runs-on: ubuntu-latest
     timeout-minutes: 360
 
     steps:
-      - name: Checkout Repo
+      - name: Checkout Repository
         uses: actions/checkout@v4
 
       - name: Update & Install Packages
         run: |
           sudo apt update -y
-          sudo apt install -y xfce4 xfce4-goodies x11vnc xvfb mesa-utils htop stress
+          sudo apt install -y xfce4 xfce4-goodies x11vnc xvfb mesa-utils htop
 
       - name: Start Virtual Display (Xvfb)
         run: |
@@ -37,33 +37,20 @@ jobs:
           x11vnc -display :99 -nopw -listen 0.0.0.0 -forever -shared &
           sleep 5
 
-      - name: Show CPU Info
+      - name: Show System Info
         run: |
           echo "CPU INFO:"
           lscpu
-
-      - name: Stress CPU (Simulate Gaming Load)
-        run: |
-          echo "Starting CPU stress..."
-          nproc=$(nproc)
-          echo "Using $nproc cores"
-
-          # Start CPU load on all cores
-          for i in $(seq 1 $nproc); do
-            stress --cpu 1 --timeout 360 &
-          done
-
-          # Log progress every 30 seconds for 6 minutes
-          for i in {1..12}; do
-            echo "[$(date)] CPU stress running..."
-            sleep 30
-          done
-          echo "CPU stress finished."
+          echo "Memory:"
+          free -h
+          echo "Disk:"
+          df -h
 
       - name: Keep Runner Alive
         run: |
-          echo "Runner will stay active for monitoring..."
-          for i in {1..12}; do
+          echo "Runner active..."
+          for i in {1..60}; do
             echo "[$(date)] Runner alive..."
             sleep 30
           done
+
