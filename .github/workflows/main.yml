@@ -1,227 +1,182 @@
-name: Free GPU Gaming VPS (Google Colab)
+name: GPU VPS on GitHub Actions
 
 on:
   workflow_dispatch:
-    inputs:
-      session_duration:
-        description: 'Max session duration (hours - Colab free = 12hrs max)'
-        required: true
-        default: '6'
-        type: choice
-        options:
-          - '2'
-          - '4'
-          - '6'
-          - '12'
 
 jobs:
-  setup-free-gaming-vps:
+  start-vps:
     runs-on: ubuntu-latest
+    timeout-minutes: 360
     
     steps:
-      - name: Checkout repository
-        uses: actions/checkout@v3
+      - name: Checkout Code
+        uses: actions/checkout@v4
 
-      - name: Setup Python
-        uses: actions/setup-python@v4
-        with:
-          python-version: '3.10'
-
-      - name: Install dependencies
+      - name: Free Disk Space
         run: |
-          pip install jupyter notebook
-          pip install pyngrok
-          pip install --upgrade google-colab
+          echo "🧹 Freeing disk space..."
+          sudo rm -rf /usr/share/dotnet
+          sudo rm -rf /opt/ghc
+          sudo rm -rf /usr/local/share/boost
+          sudo rm -rf "$AGENT_TOOLSDIRECTORY"
+          df -h
+          echo "✅ Space freed"
 
-      - name: Create Colab Gaming Notebook
+      - name: Install Desktop Environment
         run: |
-          cat > gaming_vps.ipynb << 'EOF'
-          {
-            "nbformat": 4,
-            "nbformat_minor": 0,
-            "metadata": {
-              "colab": {
-                "provenance": [],
-                "gpuType": "T4"
-              },
-              "kernelspec": {
-                "name": "python3",
-                "display_name": "Python 3"
-              },
-              "accelerator": "GPU"
-            },
-            "cells": [
-              {
-                "cell_type": "markdown",
-                "metadata": {},
-                "source": ["# 🎮 Free GPU Gaming VPS Setup\n", "**FREE Google Colab GPU (Tesla T4)**\n\n", "Session time: Up to 12 hours free"]
-              },
-              {
-                "cell_type": "code",
-                "metadata": {},
-                "source": [
-                  "# Step 1: Check GPU availability\n",
-                  "!nvidia-smi\n",
-                  "print('\\n✅ GPU is available!')"
-                ],
-                "execution_count": null,
-                "outputs": []
-              },
-              {
-                "cell_type": "code",
-                "metadata": {},
-                "source": [
-                  "# Step 2: Install VNC and Desktop Environment\n",
-                  "!apt update\n",
-                  "!apt install -y xfce4 xfce4-goodies\n",
-                  "!apt install -y tightvncserver dbus-x11\n",
-                  "!apt install -y novnc python3-websockify python3-numpy\n",
-                  "print('\\n✅ Desktop environment installed!')"
-                ],
-                "execution_count": null,
-                "outputs": []
-              },
-              {
-                "cell_type": "code",
-                "metadata": {},
-                "source": [
-                  "# Step 3: Install Gaming Software\n",
-                  "import os\n",
-                  "\n",
-                  "# Install Wine for Windows games\n",
-                  "!dpkg --add-architecture i386\n",
-                  "!apt update\n",
-                  "!apt install -y wine64 wine32 winetricks\n",
-                  "\n",
-                  "# Install Steam\n",
-                  "!wget https://steamcdn-a.akamaihd.net/client/installer/steam.deb\n",
-                  "!dpkg -i steam.deb || apt --fix-broken install -y\n",
-                  "\n",
-                  "print('\\n✅ Gaming software installed!')"
-                ],
-                "execution_count": null,
-                "outputs": []
-              },
-              {
-                "cell_type": "code",
-                "metadata": {},
-                "source": [
-                  "# Step 4: Setup ngrok tunnel for remote access\n",
-                  "!pip install pyngrok\n",
-                  "\n",
-                  "from pyngrok import ngrok, conf\n",
-                  "import getpass\n",
-                  "\n",
-                  "# Get ngrok auth token (FREE at ngrok.com)\n",
-                  "print('Get your FREE ngrok token at: https://dashboard.ngrok.com/get-started/your-authtoken')\n",
-                  "ngrok_token = getpass.getpass('Enter your ngrok auth token: ')\n",
-                  "conf.get_default().auth_token = ngrok_token\n",
-                  "\n",
-                  "# Set VNC password\n",
-                  "vnc_password = getpass.getpass('Set VNC password (6-8 chars): ')\n",
-                  "os.system(f'echo {vnc_password} | vncpasswd -f > /root/.vnc/passwd')\n",
-                  "os.system('chmod 600 /root/.vnc/passwd')\n",
-                  "\n",
-                  "print('\\n✅ Security configured!')"
-                ],
-                "execution_count": null,
-                "outputs": []
-              },
-              {
-                "cell_type": "code",
-                "metadata": {},
-                "source": [
-                  "# Step 5: Start VNC Server\n",
-                  "!vncserver :1 -geometry 1920x1080 -depth 24\n",
-                  "\n",
-                  "# Start noVNC (web-based VNC client)\n",
-                  "!nohup /usr/share/novnc/utils/novnc_proxy --vnc localhost:5901 --listen 6080 &\n",
-                  "\n",
-                  "print('\\n✅ VNC server started on port 5901')\n",
-                  "print('✅ noVNC web interface on port 6080')"
-                ],
-                "execution_count": null,
-                "outputs": []
-              },
-              {
-                "cell_type": "code",
-                "metadata": {},
-                "source": [
-                  "# Step 6: Create ngrok tunnel\n",
-                  "vnc_tunnel = ngrok.connect(5901, 'tcp')\n",
-                  "web_tunnel = ngrok.connect(6080, 'http')\n",
-                  "\n",
-                  "print('\\n━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━')\n",
-                  "print('🎮 FREE GPU GAMING VPS - CONNECTION INFO')\n",
-                  "print('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━')\n",
-                  "print(f'\\n💻 GPU: Tesla T4 (16GB VRAM)')\n",
-                  "print(f'⏱️  Session: Up to 12 hours free')\n",
-                  "print(f'\\n🔗 VNC Connection:')\n",
-                  "print(f'   Address: {vnc_tunnel.public_url.replace(\"tcp://\", \"\")}')\n",
-                  "print(f'   Password: [your VNC password]')\n",
-                  "print(f'\\n🌐 Web Browser Access (easier):')\n",
-                  "print(f'   URL: {web_tunnel.public_url}')\n",
-                  "print(f'   Password: [your VNC password]')\n",
-                  "print(f'\\n📝 Download VNC Viewer: https://www.realvnc.com/download/viewer/')\n",
-                  "print('\\n⚠️  Keep this cell running to maintain connection!')\n",
-                  "print('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\\n')\n",
-                  "\n",
-                  "# Keep alive\n",
-                  "import time\n",
-                  "try:\n",
-                  "    while True:\n",
-                  "        time.sleep(60)\n",
-                  "except KeyboardInterrupt:\n",
-                  "    print('\\n🛑 Stopping VPS...')\n",
-                  "    ngrok.kill()"
-                ],
-                "execution_count": null,
-                "outputs": []
-              }
-            ]
-          }
+          echo "🖥️ Installing XFCE desktop..."
+          sudo apt-get update
+          export DEBIAN_FRONTEND=noninteractive
+          sudo apt-get install -y xfce4 xfce4-goodies
+          echo "✅ Desktop installed"
+
+      - name: Install VNC Server
+        run: |
+          echo "🔌 Installing VNC..."
+          sudo apt-get install -y tigervnc-standalone-server
+          echo "✅ VNC installed"
+
+      - name: Install noVNC
+        run: |
+          echo "🌐 Installing noVNC..."
+          sudo apt-get install -y novnc python3-websockify
+          echo "✅ noVNC installed"
+
+      - name: Setup VNC
+        run: |
+          echo "⚙️ Configuring VNC..."
+          mkdir -p ~/.vnc
+          echo "password" | vncpasswd -f > ~/.vnc/passwd
+          chmod 600 ~/.vnc/passwd
+          
+          cat > ~/.vnc/xstartup << 'EOF'
+          #!/bin/sh
+          unset SESSION_MANAGER
+          unset DBUS_SESSION_BUS_ADDRESS
+          exec startxfce4
           EOF
           
-          echo "✅ Gaming notebook created!"
+          chmod +x ~/.vnc/xstartup
+          echo "✅ VNC configured (password: password)"
 
-      - name: Upload Colab Notebook
-        uses: actions/upload-artifact@v3
-        with:
-          name: gaming-vps-notebook
-          path: gaming_vps.ipynb
-
-      - name: Display Instructions
+      - name: Start VNC Server
         run: |
-          echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
-          echo "🎮 FREE GPU GAMING VPS - SETUP INSTRUCTIONS"
-          echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
-          echo ""
-          echo "📥 STEP 1: Download the notebook"
-          echo "   • Go to Actions tab → This workflow run"
-          echo "   • Download 'gaming-vps-notebook' artifact"
-          echo ""
-          echo "🚀 STEP 2: Open in Google Colab (FREE)"
-          echo "   • Go to: https://colab.research.google.com"
-          echo "   • Click 'Upload' and select gaming_vps.ipynb"
-          echo "   • Enable GPU: Runtime → Change runtime type → GPU (T4)"
-          echo ""
-          echo "🎯 STEP 3: Get FREE ngrok account"
-          echo "   • Sign up at: https://ngrok.com (100% FREE)"
-          echo "   • Get your auth token from dashboard"
-          echo ""
-          echo "▶️  STEP 4: Run all cells in the notebook"
-          echo "   • Each cell will setup gaming environment"
-          echo "   • Final cell gives you connection URL"
-          echo ""
-          echo "🎮 WHAT YOU GET FOR FREE:"
-          echo "   • NVIDIA Tesla T4 GPU (16GB VRAM)"
-          echo "   • 12 hours continuous session"
-          echo "   • Steam, Wine, Desktop environment"
-          echo "   • Remote access via browser or VNC"
-          echo ""
-          echo "💡 ALTERNATIVE FREE OPTIONS:"
-          echo "   • Kaggle Notebooks (30hrs/week GPU free)"
-          echo "   • Paperspace Gradient (6hrs GPU free)"
-          echo "   • Google Cloud (300$ free credit)"
-          echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+          echo "▶️ Starting VNC..."
+          vncserver :1 -geometry 1920x1080 -depth 24 -localhost no
+          sleep 3
+          echo "✅ VNC running on :5901"
 
+      - name: Start noVNC
+        run: |
+          echo "🌐 Starting noVNC..."
+          /usr/share/novnc/utils/novnc_proxy --vnc localhost:5901 --listen 6080 &
+          sleep 3
+          echo "✅ noVNC running on :6080"
+
+      - name: Install ngrok
+        run: |
+          echo "📡 Installing ngrok..."
+          wget -q https://bin.equinox.io/c/bNyj1mQVY4c/ngrok-v3-stable-linux-amd64.tgz
+          tar xvzf ngrok-v3-stable-linux-amd64.tgz
+          sudo mv ngrok /usr/local/bin/
+          echo "✅ ngrok installed"
+
+      - name: Setup ngrok
+        env:
+          NGROK_TOKEN: ${{ secrets.NGROK_TOKEN }}
+        run: |
+          if [ -z "$NGROK_TOKEN" ]; then
+            echo "❌ ERROR: NGROK_TOKEN secret not set!"
+            echo ""
+            echo "📝 How to fix:"
+            echo "1. Go to https://ngrok.com and sign up (FREE)"
+            echo "2. Get your token from: https://dashboard.ngrok.com/get-started/your-authtoken"
+            echo "3. Go to your GitHub repo → Settings → Secrets → Actions"
+            echo "4. Click 'New repository secret'"
+            echo "5. Name: NGROK_TOKEN"
+            echo "6. Value: [paste your ngrok token]"
+            echo "7. Run this workflow again"
+            echo ""
+            exit 1
+          fi
+          
+          echo "🔑 Configuring ngrok..."
+          ngrok config add-authtoken $NGROK_TOKEN
+          echo "✅ ngrok configured"
+
+      - name: Start ngrok Tunnel
+        run: |
+          echo "🚇 Starting ngrok tunnel..."
+          ngrok http 6080 --log=stdout > ngrok.log &
+          sleep 10
+          
+          # Get public URL
+          NGROK_URL=$(curl -s http://localhost:4040/api/tunnels | grep -o 'https://[^"]*' | head -1)
+          
+          if [ -z "$NGROK_URL" ]; then
+            echo "❌ Failed to get ngrok URL"
+            cat ngrok.log
+            exit 1
+          fi
+          
+          echo "✅ Tunnel created!"
+          echo "$NGROK_URL" > ngrok_url.txt
+
+      - name: Install Gaming Tools
+        run: |
+          echo "🎮 Installing gaming tools..."
+          sudo apt-get install -y firefox
+          
+          # Install Wine for Windows apps
+          sudo dpkg --add-architecture i386
+          sudo apt-get update
+          sudo apt-get install -y wine64 wine32
+          
+          echo "✅ Gaming tools installed"
+
+      - name: Display Connection Info
+        run: |
+          NGROK_URL=$(cat ngrok_url.txt)
+          
+          echo ""
+          echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+          echo "✅ GPU VPS IS RUNNING ON GITHUB ACTIONS!"
+          echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+          echo ""
+          echo "🌐 Access your VPS here:"
+          echo "   $NGROK_URL/vnc.html"
+          echo ""
+          echo "🔑 Password: password"
+          echo ""
+          echo "📊 System Info:"
+          echo "   OS: Ubuntu $(lsb_release -rs)"
+          echo "   CPU: $(nproc) cores"
+          echo "   RAM: $(free -h | grep Mem | awk '{print $2}')"
+          echo "   Disk: $(df -h / | tail -1 | awk '{print $4}') free"
+          echo ""
+          echo "⏱️ Session will run for 6 hours"
+          echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+          echo ""
+
+      - name: Keep Session Alive
+        run: |
+          echo "🔄 Keeping session alive..."
+          echo "Press Ctrl+C in the Actions log to stop"
+          echo ""
+          
+          # Keep alive for 6 hours
+          for i in {1..360}; do
+            echo "⏰ Session active: $i minutes"
+            sleep 60
+          done
+          
+          echo ""
+          echo "⏹️ Session ended after 6 hours"
+
+      - name: Cleanup
+        if: always()
+        run: |
+          echo "🧹 Cleaning up..."
+          vncserver -kill :1 || true
+          pkill ngrok || true
+          echo "✅ Cleanup complete"
