@@ -1,46 +1,69 @@
-name: Free Linux CPU Runner
+name: CPU Gaming Runner
 
 on:
   workflow_dispatch:
 
 jobs:
-  cpu-runner:
+  cpu-gaming:
     runs-on: ubuntu-latest
     timeout-minutes: 360
 
     steps:
-      - name: Checkout Repository
+      - name: Checkout Repo
         uses: actions/checkout@v4
+
+      - name: Update & Install Packages
+        run: |
+          sudo apt update -y
+          sudo apt install -y xfce4 xfce4-goodies x11vnc xvfb mesa-utils htop stress
+
+      - name: Start Virtual Display (Xvfb)
+        run: |
+          echo "Starting virtual display..."
+          export DISPLAY=:99
+          Xvfb :99 -screen 0 1280x720x24 &
+          sleep 5
+
+      - name: Start XFCE Desktop
+        run: |
+          echo "Starting XFCE desktop..."
+          export DISPLAY=:99
+          startxfce4 &
+          sleep 5
+
+      - name: Start VNC Server
+        run: |
+          echo "Starting VNC server..."
+          x11vnc -display :99 -nopw -listen 0.0.0.0 -forever -shared &
+          sleep 5
 
       - name: Show CPU Info
         run: |
           echo "CPU INFO:"
           lscpu
 
-      - name: Stress Test CPU
+      - name: Stress CPU (Simulate Gaming Load)
         run: |
-          echo "Starting CPU workload..."
+          echo "Starting CPU stress..."
           nproc=$(nproc)
           echo "Using $nproc cores"
 
-          # Start a CPU load on all cores for 6 minutes
+          # Start CPU load on all cores
           for i in $(seq 1 $nproc); do
-            yes > /dev/null &
+            stress --cpu 1 --timeout 360 &
           done
-          sleep 360
-          killall yes
 
-      - name: List Disk & Memory
-        run: |
-          echo "Disk usage:"
-          df -h
-          echo "Memory:"
-          free -h
+          # Log progress every 30 seconds for 6 minutes
+          for i in {1..12}; do
+            echo "[$(date)] CPU stress running..."
+            sleep 30
+          done
+          echo "CPU stress finished."
 
       - name: Keep Runner Alive
         run: |
-          echo "Runner will stay active (logs updated every minute)..."
-          for i in {1..6}; do
+          echo "Runner will stay active for monitoring..."
+          for i in {1..12}; do
             echo "[$(date)] Runner alive..."
-            sleep 60
+            sleep 30
           done
