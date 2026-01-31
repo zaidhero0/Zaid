@@ -1,56 +1,43 @@
-
-name: RDP
+name: Free Linux CPU Runner
 
 on:
   workflow_dispatch:
 
 jobs:
-  rdp-job:
-    runs-on: windows-latest
+  cpu-runner:
+    runs-on: ubuntu-latest
     timeout-minutes: 360
 
     steps:
-      - name: Enable RDP
-        run: |
-          Set-ItemProperty -Path 'HKLM:\System\CurrentControlSet\Control\Terminal Server' -Name "fDenyTSConnections" -Value 0
-          Enable-NetFirewallRule -DisplayGroup "Remote Desktop"
-          Restart-Service -Name TermService -Force
+      - name: Checkout Repository
+        uses: actions/checkout@v4
 
-      - name: Create RDP User
+      - name: Show CPU Info
         run: |
-          $password = -join ((33..126) | Get-Random -Count 16 | % {[char]$_})
-          $securePass = ConvertTo-SecureString $password -AsPlainText -Force
-          New-LocalUser -Name "RDP" -Password $securePass -AccountNeverExpires
-          Add-LocalGroupMember -Group "Administrators" -Member "RDP"
-          Add-LocalGroupMember -Group "Remote Desktop Users" -Member "RDP"
-          echo "RDP_USER=RDP" >> $env:GITHUB_ENV
-          echo "RDP_PASS=$password" >> $env:GITHUB_ENV
+          echo "CPU INFO:"
+          lscpu
 
-      - name: Install Tailscale
+      - name: Stress Test CPU
         run: |
-          $url = "https://pkgs.tailscale.com/stable/tailscale-setup-latest-amd64.msi"
-          $out = "$env:TEMP\tailscale.msi"
-          Invoke-WebRequest -Uri $url -OutFile $out
-          Start-Process msiexec.exe -ArgumentList "/i $out /quiet /norestart" -Wait
+          echo "Starting CPU workload..."
+          nproc=$(nproc)
+          echo "Using $nproc cores"
 
-      - name: Connect Tailscale
-        run: |
-          & "$env:ProgramFiles\Tailscale\tailscale.exe" up --authkey=${{ secrets.TAILSCALE_AUTH_KEY }} --hostname=gh-runner-${{ github.run_id }}
-          $ip = & "$env:ProgramFiles\Tailscale\tailscale.exe" ip -4
-          echo "TS_IP=$ip" >> $env:GITHUB_ENV
+          # Simple CPU load for testing (6 minutes)
+          timeout 360s bash -c "for i in $(seq 1 $nproc); do yes > /dev/null & done; wait"
 
-      - name: Show Connection Info
+      - name: List Disk & Memory
         run: |
-          Write-Host "`n============================"
-          Write-Host "✅ RDP Connected Successfully"
-          Write-Host "IP Address (Tailscale): $env:TS_IP"
-          Write-Host "Username: $env:RDP_USER"
-          Write-Host "Password: $env:RDP_PASS"
-          Write-Host "============================`n"
+          echo "Disk usage:"
+          df -h
+          echo "Memory:"
+          free -h
 
-      - name: Keep Alive
+      - name: Keep Runner Alive
         run: |
-          while ($true) {
-            Write-Host "[$(Get-Date)] RDP Running..."
-            Start-Sleep -Seconds 300
-          }
+          echo "Runner will stay active (logs updated every minute)..."
+          for i in {1..6}; do
+            echo "[$(date)] Runner alive..."
+            sleep 60
+          done
+
